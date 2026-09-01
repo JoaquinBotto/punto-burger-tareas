@@ -30,4 +30,22 @@ describe('Bootstrap Resilience & Watchdog Architecture', () => {
     const canRenderLogin = !authLoading && (!session || !user)
     expect(canRenderLogin).toBe(true)
   })
+
+  it('should follow 4-level fallback order for user display name', () => {
+    const resolveName = (profile: any, user: any) => {
+      return profile?.full_name || user?.user_metadata?.full_name || (user?.email ? user.email.split('@')[0] : 'Usuario')
+    }
+
+    // Level 1: Profile full_name
+    expect(resolveName({ full_name: 'Joaquin' }, { email: 'admin@pb.com' })).toBe('Joaquin')
+
+    // Level 2: Metadata full_name
+    expect(resolveName(null, { user_metadata: { full_name: 'Joaquin' }, email: 'admin@pb.com' })).toBe('Joaquin')
+
+    // Level 3: Email username
+    expect(resolveName(null, { email: 'joaquin@pb.com' })).toBe('joaquin')
+
+    // Level 4: Generic fallback
+    expect(resolveName(null, null)).toBe('Usuario')
+  })
 })

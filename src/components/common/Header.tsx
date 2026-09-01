@@ -51,9 +51,11 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenTags,
   onOpenSettings
 }) => {
-  const { profile, isAdmin, isResponsable, logout } = useAuth()
+  const { user, profile, isAdmin, isResponsable, logout } = useAuth()
   const todayFormatted = formatHeaderDate()
   const [showAdminMenu, setShowAdminMenu] = useState(false)
+
+  const displayName = profile?.full_name || (user?.user_metadata as any)?.full_name || (user?.email ? user.email.split('@')[0] : 'Usuario')
 
   const getRoleBadge = () => {
     if (isAdmin) {
@@ -315,11 +317,11 @@ export const Header: React.FC<HeaderProps> = ({
           {/* User Profile Pill */}
           <div className="flex items-center gap-2.5 pl-2 sm:border-l sm:border-[#E8E2D9]">
             <div className="w-8 h-8 rounded-full bg-[#FAF0F0] border border-[#F5D0D0] text-[#C92A2A] font-bold text-xs flex items-center justify-center">
-              {profile?.full_name?.charAt(0).toUpperCase() || 'U'}
+              {displayName.charAt(0).toUpperCase()}
             </div>
             <div className="hidden md:block text-left">
               <div className="text-xs font-bold text-[#18181B] leading-tight truncate max-w-[140px]">
-                {profile?.full_name || 'Usuario'}
+                {displayName}
               </div>
               <div className="mt-0.5">{getRoleBadge()}</div>
             </div>

@@ -329,7 +329,7 @@ const MainApp: React.FC = () => {
             areas={areas}
             profiles={profiles}
             activity={activity}
-            userName={profile?.full_name || 'Equipo'}
+            userName={profile?.full_name || (user?.user_metadata as any)?.full_name || (user?.email ? user.email.split('@')[0] : 'Usuario')}
             onSelectTask={(task) => setSelectedTask(task)}
             onNavigateToTasksWithFilter={handleNavigateWithFilters}
           />
