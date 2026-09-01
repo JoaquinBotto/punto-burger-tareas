@@ -1,0 +1,681 @@
+import React, { useState } from 'react'
+import type { TaskWithDetails, TaskStatus, Area, Profile } from '../../types'
+import { taskService } from '../../services/taskService'
+import { useAuth } from '../../contexts/AuthContext'
+import { formatDueDate, getTimeDifferenceDescription } from '../../lib/dateUtils'
+import { ConfirmationModal } from '../common/ConfirmationModal'
+import { StateChangeModal } from '../common/StateChangeModal'
+import {
+  X,
+  CheckCircle2,
+  Clock,
+  Lock,
+  Users,
+  Plus,
+  Trash2,
+  Paperclip,
+  MessageSquare,
+  Archive,
+  RotateCcw,
+  CheckSquare,
+  Square,
+  Send,
+  Camera,
+  Link
+} from 'lucide-react'
+
+interface TaskDetailDrawerProps {
+  task: TaskWithDetails | null
+  allTasks: TaskWithDetails[]
+  areas?: Area[]
+  profiles?: Profile[]
+  isOpen: boolean
+  onClose: () => void
+  onTaskUpdated: () => void
+}
+
+export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
+  task,
+  allTasks,
+  isOpen,
+  onClose,
+  onTaskUpdated
+}) => {
+  const { user, isAdmin } = useAuth()
+  
+  const [activeTab, setActiveTab] = useState<'checklist' | 'comments' | 'attachments' | 'dependencies'>('checklist')
+  
+  // Modals state
+  const [showConfirmCritical, setShowConfirmCritical] = useState(false)
+  const [showConfirmArchive, setShowConfirmArchive] = useState(false)
+  const [showConfirmRestore, setShowConfirmRestore] = useState(false)
+  const [stateModalTarget, setStateModalTarget] = useState<TaskStatus | null>(null)
+
+  // Inputs
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState('')
+  const [newComment, setNewComment] = useState('')
+  const [selectedBlockingTaskId, setSelectedBlockingTaskId] = useState('')
+  const [manualProgress, setManualProgress] = useState(task?.progress_percentage || 0)
+  const [isSaving, setIsSaving] = useState(false)
+
+  if (!isOpen || !task) return null
+
+  const isAssigned = task.main_assignee_id === user?.id || task.assignees?.some(a => a.id === user?.id)
+  const canEdit = isAdmin || isAssigned
+  const totalSubtasks = task.subtasks?.length || 0
+  const isCompleted = task.status === 'completada'
+
+  // Subtask Toggle
+  const handleToggleSubtask = async (subtaskId: string, isCompleted: boolean) => {
+    if (!canEdit) return
+    await taskService.toggleSubtask(task.id, subtaskId, isCompleted, user?.id || 'u1')
+    onTaskUpdated()
+  }
+
+  // Add Subtask
+  const handleAddSubtask = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newSubtaskTitle.trim() || !canEdit) return
+    await taskService.addSubtask(task.id, newSubtaskTitle.trim(), totalSubtasks + 1)
+    setNewSubtaskTitle('')
+    onTaskUpdated()
+  }
+
+  // Delete Subtask
+  const handleDeleteSubtask = async (subtaskId: string) => {
+    if (!canEdit) return
+    await taskService.deleteSubtask(task.id, subtaskId)
+    onTaskUpdated()
+  }
+
+  // Manual Progress Change
+  const handleManualProgressCommit = async (val: number) => {
+    if (!canEdit || totalSubtasks > 0) return
+    setManualProgress(val)
+    await taskService.updateTask(task.id, { progress_percentage: val, is_progress_manual: true })
+    onTaskUpdated()
+  }
+
+  // Complete Task Action
+  const handleCompleteClick = () => {
+    if (task.priority === 'critica') {
+      setShowConfirmCritical(true)
+    } else {
+      executeStatusChange('completada')
+    }
+  }
+
+  const executeStatusChange = async (
+    newStatus: TaskStatus,
+    extra?: {
+      blocked_reason?: string
+      third_party_name?: string
+      third_party_reason?: string
+      third_party_promised_date?: string
+      third_party_contact?: string
+    }
+  ) => {
+    setIsSaving(true)
+    await taskService.updateTaskStatus(task.id, newStatus, user?.id || 'u1', extra)
+    setIsSaving(false)
+    setShowConfirmCritical(false)
+    setStateModalTarget(null)
+    onTaskUpdated()
+  }
+
+  // Archive & Restore
+  const handleArchive = async () => {
+    if (!isAdmin) return
+    setIsSaving(true)
+    await taskService.archiveTask(task.id, user?.id || 'u1')
+    setIsSaving(false)
+    setShowConfirmArchive(false)
+    onTaskUpdated()
+    onClose()
+  }
+
+  const handleRestore = async () => {
+    if (!isAdmin) return
+    setIsSaving(true)
+    await taskService.restoreTask(task.id)
+    setIsSaving(false)
+    setShowConfirmRestore(false)
+    onTaskUpdated()
+  }
+
+  // Add Comment
+  const handleAddComment = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newComment.trim()) return
+    await taskService.addComment(task.id, user?.id || 'u1', newComment.trim())
+    setNewComment('')
+    onTaskUpdated()
+  }
+
+  // Add Dependency
+  const handleAddDependency = async () => {
+    if (!selectedBlockingTaskId || !canEdit) return
+    await taskService.addDependency(task.id, selectedBlockingTaskId)
+    setSelectedBlockingTaskId('')
+    onTaskUpdated()
+  }
+
+  const handleRemoveDependency = async (depId: string) => {
+    if (!canEdit) return
+    await taskService.removeDependency(depId)
+    onTaskUpdated()
+  }
+
+  // File Upload
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    alert(`Archivo seleccionado: ${file.name} (${Math.round(file.size / 1024)} KB). La subida a Storage privado se activará al conectar Supabase.`)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex justify-end animate-in fade-in">
+      <div className="bg-white w-full max-w-2xl h-full flex flex-col shadow-2xl border-l border-[#E8E2D9] animate-in slide-in-from-right duration-300">
+        
+        {/* Header */}
+        <div className="p-5 sm:p-6 border-b border-[#F0EBE1] flex items-start justify-between gap-4 bg-[#FAF7F2]">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              {task.area && (
+                <span
+                  className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold text-white shadow-xs"
+                  style={{ backgroundColor: task.area.color || '#C92A2A' }}
+                >
+                  {task.area.name}
+                </span>
+              )}
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-black uppercase tracking-wider bg-red-100 text-[#C92A2A] border border-red-200">
+                Prioridad {task.priority}
+              </span>
+              {task.archived_at && (
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-zinc-200 text-zinc-700">
+                  Archivada
+                </span>
+              )}
+            </div>
+
+            <h2 className="text-xl sm:text-2xl font-black text-[#18181B] leading-tight">
+              {task.title}
+            </h2>
+
+            <p className="text-xs text-[#71717A] flex items-center gap-2">
+              <span>{formatDueDate(task.due_date, task.due_time)}</span>
+              {task.due_date && (
+                <>
+                  <span>•</span>
+                  <span className="font-semibold text-[#18181B]">
+                    {getTimeDifferenceDescription(task.due_date, task.due_time)}
+                  </span>
+                </>
+              )}
+            </p>
+          </div>
+
+          <button
+            onClick={onClose}
+            className="p-2 rounded-xl text-[#A1A1AA] hover:text-[#18181B] hover:bg-white transition-colors cursor-pointer"
+          >
+            <X className="w-6 h-6" />
+          </button>
+        </div>
+
+        {/* Quick Action Bar */}
+        <div className="p-3 sm:px-6 bg-white border-b border-[#F0EBE1] flex items-center gap-2 overflow-x-auto">
+          {task.status !== 'en_progreso' && !isCompleted && (
+            <button
+              onClick={() => executeStatusChange('en_progreso')}
+              className="px-3.5 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer flex-shrink-0"
+            >
+              <Clock className="w-3.5 h-3.5 text-amber-700" />
+              <span>Comenzar Tarea</span>
+            </button>
+          )}
+
+          {!isCompleted ? (
+            <button
+              onClick={handleCompleteClick}
+              className="px-3.5 py-2 rounded-xl bg-green-600 hover:bg-green-700 text-white text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer flex-shrink-0"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Completar</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => executeStatusChange('en_progreso')}
+              className="px-3.5 py-2 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-800 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer flex-shrink-0"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Reabrir Tarea</span>
+            </button>
+          )}
+
+          {task.status !== 'bloqueada' && !isCompleted && (
+            <button
+              onClick={() => setStateModalTarget('bloqueada')}
+              className="px-3.5 py-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer flex-shrink-0"
+            >
+              <Lock className="w-3.5 h-3.5" />
+              <span>Marcar Bloqueada</span>
+            </button>
+          )}
+
+          {task.status !== 'esperando_tercero' && !isCompleted && (
+            <button
+              onClick={() => setStateModalTarget('esperando_tercero')}
+              className="px-3.5 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer flex-shrink-0"
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>Esperando Tercero</span>
+            </button>
+          )}
+
+          {isAdmin && (
+            !task.archived_at ? (
+              <button
+                onClick={() => setShowConfirmArchive(true)}
+                className="px-3 py-2 rounded-xl text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer flex-shrink-0 ml-auto"
+                title="Archivar tarea"
+              >
+                <Archive className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Archivar</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => setShowConfirmRestore(true)}
+                className="px-3 py-2 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-900 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer flex-shrink-0 ml-auto"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Restaurar</span>
+              </button>
+            )
+          )}
+        </div>
+
+        {/* Status Warnings */}
+        {task.status === 'bloqueada' && task.blocked_reason && (
+          <div className="px-6 py-3 bg-red-50 border-b border-red-200 text-xs text-red-800 flex items-start gap-2.5">
+            <Lock className="w-4 h-4 text-[#DC2626] flex-shrink-0 mt-0.5" />
+            <div>
+              <span className="font-bold">Tarea Bloqueada: </span>
+              <span>{task.blocked_reason}</span>
+            </div>
+          </div>
+        )}
+
+        {task.status === 'esperando_tercero' && task.third_party_name && (
+          <div className="px-6 py-3 bg-indigo-50 border-b border-indigo-200 text-xs text-indigo-900 flex items-start gap-2.5">
+            <Users className="w-4 h-4 text-[#4F46E5] flex-shrink-0 mt-0.5" />
+            <div>
+              <span className="font-bold">Esperando a {task.third_party_name}: </span>
+              <span>{task.third_party_reason}</span>
+              {task.third_party_contact && <span className="block mt-0.5 font-semibold">Contacto: {task.third_party_contact}</span>}
+            </div>
+          </div>
+        )}
+
+        {/* Tab Navigation */}
+        <div className="px-6 pt-3 flex items-center gap-4 border-b border-[#F0EBE1] text-xs font-bold">
+          <button
+            onClick={() => setActiveTab('checklist')}
+            className={`pb-3 border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'checklist' ? 'border-[#C92A2A] text-[#C92A2A]' : 'border-transparent text-[#71717A] hover:text-[#18181B]'
+            }`}
+          >
+            <CheckSquare className="w-4 h-4" />
+            <span>Checklist ({task.subtasks?.length || 0})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('comments')}
+            className={`pb-3 border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'comments' ? 'border-[#C92A2A] text-[#C92A2A]' : 'border-transparent text-[#71717A] hover:text-[#18181B]'
+            }`}
+          >
+            <MessageSquare className="w-4 h-4" />
+            <span>Comentarios ({task.comments?.length || 0})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('attachments')}
+            className={`pb-3 border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'attachments' ? 'border-[#C92A2A] text-[#C92A2A]' : 'border-transparent text-[#71717A] hover:text-[#18181B]'
+            }`}
+          >
+            <Paperclip className="w-4 h-4" />
+            <span>Adjuntos ({task.attachments?.length || 0})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('dependencies')}
+            className={`pb-3 border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'dependencies' ? 'border-[#C92A2A] text-[#C92A2A]' : 'border-transparent text-[#71717A] hover:text-[#18181B]'
+            }`}
+          >
+            <Link className="w-4 h-4" />
+            <span>Bloqueos ({task.dependencies?.length || 0})</span>
+          </button>
+        </div>
+
+        {/* Tab Body */}
+        <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6">
+          
+          {/* TAB 1: CHECKLIST */}
+          {activeTab === 'checklist' && (
+            <div className="space-y-5">
+              {/* Progress Summary Card */}
+              <div className="p-4 rounded-2xl bg-[#FAF7F2] border border-[#E8E2D9]">
+                <div className="flex items-center justify-between text-xs font-bold text-[#18181B] mb-2">
+                  <span>Progreso de la Tarea</span>
+                  <span>{task.progress_percentage}%</span>
+                </div>
+                <div className="w-full h-2.5 bg-zinc-200 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-[#16A34A] rounded-full transition-all duration-300"
+                    style={{ width: `${task.progress_percentage}%` }}
+                  />
+                </div>
+
+                {/* Manual Slider if 0 Subtasks */}
+                {totalSubtasks === 0 && (
+                  <div className="mt-4 pt-3 border-t border-[#E8E2D9]">
+                    <div className="flex justify-between items-center text-xs mb-1">
+                      <span className="text-[#71717A] font-semibold">Ajustar avance manual:</span>
+                      <span className="font-bold text-[#18181B]">{manualProgress}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="5"
+                      disabled={!canEdit}
+                      value={manualProgress}
+                      onChange={(e) => setManualProgress(Number(e.target.value))}
+                      onMouseUp={() => handleManualProgressCommit(manualProgress)}
+                      onTouchEnd={() => handleManualProgressCommit(manualProgress)}
+                      className="w-full accent-[#C92A2A] cursor-pointer"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Subtasks List */}
+              <div className="space-y-2">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-[#71717A]">
+                  Pasos a Realizar ({task.subtasks?.filter(s => s.is_completed).length || 0}/{totalSubtasks})
+                </h4>
+
+                {totalSubtasks === 0 ? (
+                  <div className="p-6 rounded-2xl bg-zinc-50 border border-dashed border-zinc-200 text-center text-xs text-[#71717A]">
+                    No hay subtareas registradas. Puedes agregar pasos a continuación para guiar al equipo.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {task.subtasks?.map((st) => (
+                      <div
+                        key={st.id}
+                        onClick={() => handleToggleSubtask(st.id, !st.is_completed)}
+                        className={`p-3.5 rounded-2xl border transition-all flex items-center justify-between gap-3 cursor-pointer ${
+                          st.is_completed
+                            ? 'bg-green-50/50 border-green-200 text-green-900'
+                            : 'bg-white border-[#E8E2D9] text-[#18181B] hover:border-[#C92A2A]/40'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          {st.is_completed ? (
+                            <CheckSquare className="w-5 h-5 text-[#16A34A] flex-shrink-0" />
+                          ) : (
+                            <Square className="w-5 h-5 text-[#A1A1AA] flex-shrink-0" />
+                          )}
+                          <span className={`text-sm font-semibold truncate ${st.is_completed ? 'line-through text-zinc-500' : ''}`}>
+                            {st.title}
+                          </span>
+                        </div>
+
+                        {canEdit && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleDeleteSubtask(st.id)
+                            }}
+                            className="text-zinc-400 hover:text-red-600 p-1 cursor-pointer"
+                            title="Eliminar subtarea"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Add Subtask input */}
+                {canEdit && (
+                  <form onSubmit={handleAddSubtask} className="flex gap-2 pt-2">
+                    <input
+                      type="text"
+                      value={newSubtaskTitle}
+                      onChange={(e) => setNewSubtaskTitle(e.target.value)}
+                      placeholder="Agregar nuevo paso al checklist..."
+                      className="flex-1 p-3 bg-[#FAF7F2] border border-[#E8E2D9] rounded-2xl text-xs text-[#18181B] focus:outline-none focus:ring-2 focus:ring-[#C92A2A] focus:bg-white"
+                    />
+                    <button
+                      type="submit"
+                      className="px-4 py-3 bg-[#C92A2A] hover:bg-[#B02525] text-white text-xs font-bold rounded-2xl transition-all flex items-center gap-1 cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>Agregar</span>
+                    </button>
+                  </form>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 2: COMMENTS */}
+          {activeTab === 'comments' && (
+            <div className="space-y-4">
+              <div className="space-y-3">
+                {(!task.comments || task.comments.length === 0) ? (
+                  <div className="p-8 rounded-2xl bg-zinc-50 border border-zinc-200 text-center text-xs text-[#71717A]">
+                    Aún no hay comentarios en esta tarea. Deja una nota para el equipo.
+                  </div>
+                ) : (
+                  task.comments.map(c => (
+                    <div key={c.id} className="p-4 rounded-2xl bg-[#FAF7F2] border border-[#E8E2D9] space-y-1">
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="font-bold text-[#18181B]">
+                          {c.profile?.full_name || 'Integrante'}
+                        </span>
+                        <span className="text-[#A1A1AA] text-[11px]">
+                          {new Date(c.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                      <p className="text-sm text-[#18181B] leading-relaxed">{c.content}</p>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <form onSubmit={handleAddComment} className="flex gap-2 pt-2">
+                <input
+                  type="text"
+                  value={newComment}
+                  onChange={(e) => setNewComment(e.target.value)}
+                  placeholder="Escribe un comentario o actualización..."
+                  className="flex-1 p-3 bg-[#FAF7F2] border border-[#E8E2D9] rounded-2xl text-xs text-[#18181B] focus:outline-none focus:ring-2 focus:ring-[#C92A2A] focus:bg-white"
+                />
+                <button
+                  type="submit"
+                  className="px-4 py-3 bg-[#18181B] hover:bg-black text-white text-xs font-bold rounded-2xl transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Send className="w-4 h-4" />
+                  <span>Enviar</span>
+                </button>
+              </form>
+            </div>
+          )}
+
+          {/* TAB 3: ATTACHMENTS */}
+          {activeTab === 'attachments' && (
+            <div className="space-y-4">
+              <div className="p-4 rounded-2xl bg-zinc-50 border border-zinc-200 flex flex-col sm:flex-row items-center justify-between gap-3">
+                <div className="text-xs text-[#71717A]">
+                  Adjunta fotografías de avance, comprobantes o planos (Storage Privado).
+                </div>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <label className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-[#C92A2A] hover:bg-[#B02525] text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all">
+                    <Camera className="w-4 h-4" />
+                    <span>Tomar Foto / Subir</span>
+                    <input
+                      type="file"
+                      accept="image/*,application/pdf"
+                      capture="environment"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {(!task.attachments || task.attachments.length === 0) ? (
+                <div className="p-8 text-center text-xs text-[#71717A]">
+                  No hay archivos adjuntos en esta tarea.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {task.attachments.map(att => (
+                    <div key={att.id} className="p-3 rounded-2xl bg-[#FAF7F2] border border-[#E8E2D9] flex items-center justify-between text-xs">
+                      <span className="font-semibold text-[#18181B] truncate">{att.file_name}</span>
+                      <span className="text-[#71717A] text-[11px]">{Math.round(att.file_size / 1024)} KB</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 4: DEPENDENCIES */}
+          {activeTab === 'dependencies' && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-[#71717A]">
+                  Tareas que Bloquean esta Tarea
+                </h4>
+
+                {(!task.dependencies || task.dependencies.length === 0) ? (
+                  <div className="p-6 rounded-2xl bg-zinc-50 border border-dashed border-zinc-200 text-center text-xs text-[#71717A]">
+                    Esta tarea no tiene dependencias bloqueantes registradas.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {task.dependencies.map(dep => (
+                      <div key={dep.id} className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2">
+                          <Lock className="w-4 h-4 text-amber-700" />
+                          <span className="font-bold text-amber-900">{dep.blocking_task?.title || 'Tarea bloqueante'}</span>
+                        </div>
+                        {canEdit && (
+                          <button
+                            onClick={() => handleRemoveDependency(dep.id)}
+                            className="text-red-500 hover:text-red-700 p-1 cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {canEdit && (
+                <div className="pt-2">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-[#71717A] mb-1.5">
+                    Declarar nueva dependencia
+                  </label>
+                  <div className="flex gap-2">
+                    <select
+                      value={selectedBlockingTaskId}
+                      onChange={(e) => setSelectedBlockingTaskId(e.target.value)}
+                      className="flex-1 p-3 bg-[#FAF7F2] border border-[#E8E2D9] rounded-2xl text-xs font-semibold text-[#18181B]"
+                    >
+                      <option value="">Seleccionar tarea que debe terminarse antes...</option>
+                      {allTasks
+                        .filter(t => t.id !== task.id && !t.archived_at)
+                        .map(t => (
+                          <option key={t.id} value={t.id}>
+                            {t.title} ({t.status})
+                          </option>
+                        ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleAddDependency}
+                      className="px-4 py-3 bg-[#18181B] hover:bg-black text-white text-xs font-bold rounded-2xl transition-all cursor-pointer"
+                    >
+                      Vincular
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+        </div>
+
+      </div>
+
+      {/* Confirmation Modals */}
+      <ConfirmationModal
+        isOpen={showConfirmCritical}
+        title="¿Completar Tarea Crítica?"
+        message={`"${task.title}" es una tarea prioritaria para la apertura de Punto Burger. ¿Confirmas que todos los trabajos fueron completados e inspeccionados correctamente?`}
+        confirmText="Sí, Completar Tarea"
+        variant="danger"
+        isLoading={isSaving}
+        onConfirm={() => executeStatusChange('completada')}
+        onCancel={() => setShowConfirmCritical(false)}
+      />
+
+      <ConfirmationModal
+        isOpen={showConfirmArchive}
+        title="¿Archivar Tarea?"
+        message={`"${task.title}" será archivada. No aparecerá en las vistas operativas principales pero podrá ser consultada por el Administrador.`}
+        confirmText="Archivar Tarea"
+        variant="warning"
+        isLoading={isSaving}
+        onConfirm={handleArchive}
+        onCancel={() => setShowConfirmArchive(false)}
+      />
+
+      <ConfirmationModal
+        isOpen={showConfirmRestore}
+        title="¿Restaurar Tarea?"
+        message={`"${task.title}" volverá a estar activa en el tablero general.`}
+        confirmText="Restaurar Tarea"
+        variant="success"
+        isLoading={isSaving}
+        onConfirm={handleRestore}
+        onCancel={() => setShowConfirmRestore(false)}
+      />
+
+      {stateModalTarget && (
+        <StateChangeModal
+          isOpen={Boolean(stateModalTarget)}
+          targetStatus={stateModalTarget}
+          taskTitle={task.title}
+          isLoading={isSaving}
+          onConfirm={(extra) => executeStatusChange(stateModalTarget, extra)}
+          onCancel={() => setStateModalTarget(null)}
+        />
+      )}
+
+    </div>
+  )
+}
