@@ -214,7 +214,7 @@ export type Database = {
           content: string
           created_at?: string
           id?: string
-          profile_id: string
+          profile_id?: string
           task_id: string
           updated_at?: string
         }
@@ -535,22 +535,89 @@ export type Database = {
           },
         ]
       }
+      task_blocks: {
+        Row: {
+          blocked_at: string
+          blocked_by: string | null
+          created_at: string
+          estimated_resolution_at: string | null
+          id: string
+          reason: string
+          related_party: string | null
+          resolution_comment: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          task_id: string
+        }
+        Insert: {
+          blocked_at?: string
+          blocked_by?: string | null
+          created_at?: string
+          estimated_resolution_at?: string | null
+          id?: string
+          reason: string
+          related_party?: string | null
+          resolution_comment?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          task_id: string
+        }
+        Update: {
+          blocked_at?: string
+          blocked_by?: string | null
+          created_at?: string
+          estimated_resolution_at?: string | null
+          id?: string
+          reason?: string
+          related_party?: string | null
+          resolution_comment?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          task_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_blocks_blocked_by_fkey"
+            columns: ["blocked_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_blocks_resolved_by_fkey"
+            columns: ["resolved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_blocks_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       task_dependencies: {
         Row: {
           blocking_task_id: string
           created_at: string
+          dependency_type: string
           id: string
           task_id: string
         }
         Insert: {
           blocking_task_id: string
           created_at?: string
+          dependency_type?: string
           id?: string
           task_id: string
         }
         Update: {
           blocking_task_id?: string
           created_at?: string
+          dependency_type?: string
           id?: string
           task_id?: string
         }
@@ -642,7 +709,7 @@ export type Database = {
           completed_at?: string | null
           completed_by?: string | null
           created_at?: string
-          created_by: string
+          created_by?: string
           description?: string | null
           due_date?: string | null
           due_time?: string | null

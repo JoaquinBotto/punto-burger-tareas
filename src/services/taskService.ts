@@ -1,5 +1,5 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
-import type { Task, TaskWithDetails, Subtask, Comment, TaskFilters, TaskStatus, TaskPriority } from '../types'
+import type { Task, TaskWithDetails, Subtask, Comment, TaskFilters, TaskStatus, TaskPriority, DependencyType } from '../types'
 import { DEMO_TASKS, INITIAL_AREAS, DEMO_PROFILES } from '../data/demoData'
 
 let localTasksMemory: TaskWithDetails[] = JSON.parse(JSON.stringify(DEMO_TASKS))
@@ -41,7 +41,7 @@ export const taskService = {
           }
         }
         if (filters.isBlockedOnly) {
-          filtered = filtered.filter(t => t.status === 'bloqueada')
+          filtered = filtered.filter(t => t.status === 'bloqueada' || t.status === 'esperando_tercero')
         }
         if (filters.searchQuery?.trim()) {
           const query = filters.searchQuery.toLowerCase()
@@ -66,6 +66,7 @@ export const taskService = {
           comments(*, profile:profiles(*)),
           attachments(*),
           task_dependencies!task_dependencies_task_id_fkey(*, blocking_task:tasks!task_dependencies_blocking_task_id_fkey(*)),
+          task_blocks(*, blocked_by_profile:profiles!task_blocks_blocked_by_fkey(*), resolved_by_profile:profiles!task_blocks_resolved_by_fkey(*)),
           task_assignees(profile:profiles(*))
         `)
         .order('created_at', { ascending: false })
@@ -95,7 +96,7 @@ export const taskService = {
       }
 
       if (filters?.isBlockedOnly) {
-        query = query.eq('status', 'bloqueada')
+        query = query.in('status', ['bloqueada', 'esperando_tercero'])
       }
 
       if (filters?.searchQuery?.trim()) {
@@ -112,7 +113,8 @@ export const taskService = {
       const formatted = (data || []).map((t: any) => ({
         ...t,
         assignees: (t.task_assignees || []).map((ta: any) => ta.profile).filter(Boolean),
-        dependencies: t.task_dependencies || []
+        dependencies: t.task_dependencies || [],
+        blocks: t.task_blocks || []
       }))
 
       return formatted as TaskWithDetails[]
@@ -191,6 +193,7 @@ export const taskService = {
         comments: [],
         attachments: [],
         dependencies: [],
+        blocks: [],
         assignees: (payload.additional_assignees || []).map(id => DEMO_PROFILES.find(p => p.id === id)).filter(Boolean) as any
       }
 
@@ -274,7 +277,8 @@ export const taskService = {
         subtasks: createdSubtasks,
         comments: [],
         attachments: [],
-        dependencies: []
+        dependencies: [],
+        blocks: []
       }
 
       return { success: true, data: completeTask }
@@ -333,6 +337,12 @@ export const taskService = {
 
       const { data, error } = await query.select().single()
       if (error || !data) {
+        if (currentVersion !== undefined && (error?.code === 'PGRST116' || !data)) {
+          return {
+            success: false,
+            error: 'Esta tarea fue modificada por otra persona. Actualizá la información antes de volver a guardar.'
+          }
+        }
         console.error('[taskService.updateTaskDetails] Error:', error)
         return { success: false, error: error?.message || 'No se pudo actualizar la tarea en Supabase.' }
       }
@@ -498,11 +508,15 @@ export const taskService = {
     _userId?: string,
     extra?: {
       blocked_reason?: string
+      related_party?: string
+      estimated_resolution_at?: string
+      resolution_comment?: string
       third_party_name?: string
       third_party_reason?: string
       third_party_promised_date?: string
       third_party_contact?: string
-    }
+    },
+    currentVersion?: number
   ): Promise<{ success: boolean; error?: string }> {
     if (!isSupabaseConfigured) {
       localTasksMemory = localTasksMemory.map(t => {
@@ -519,6 +533,7 @@ export const taskService = {
             third_party_reason: newStatus === 'esperando_tercero' ? (extra?.third_party_reason || null) : t.third_party_reason,
             third_party_promised_date: newStatus === 'esperando_tercero' ? (extra?.third_party_promised_date || null) : t.third_party_promised_date,
             third_party_contact: newStatus === 'esperando_tercero' ? (extra?.third_party_contact || null) : t.third_party_contact,
+            version: (t.version || 1) + 1,
             updated_at: new Date().toISOString()
           }
         }
@@ -560,15 +575,47 @@ export const taskService = {
         updates.third_party_contact = extra.third_party_contact || null
       }
 
-      const { data, error } = await (supabase.from('tasks') as any)
+      let query = (supabase.from('tasks') as any)
         .update(updates)
         .eq('id', taskId)
-        .select()
-        .single()
+
+      if (currentVersion !== undefined) {
+        query = query.eq('version', currentVersion)
+      }
+
+      const { data, error } = await query.select().single()
 
       if (error || !data) {
+        if (currentVersion !== undefined && (error?.code === 'PGRST116' || !data)) {
+          return {
+            success: false,
+            error: 'Esta tarea fue modificada por otra persona. Actualizá la información antes de volver a guardar.'
+          }
+        }
         console.error('[taskService.updateTaskStatus] Error:', error)
         return { success: false, error: error?.message || 'No se pudo actualizar el estado de la tarea en Supabase.' }
+      }
+
+      // Historial de Bloqueos en public.task_blocks
+      if (newStatus === 'bloqueada') {
+        await (supabase.from('task_blocks') as any).insert({
+          task_id: taskId,
+          blocked_by: currentUserId || null,
+          reason: extra?.blocked_reason || 'Sin motivo especificado',
+          related_party: extra?.related_party || null,
+          estimated_resolution_at: extra?.estimated_resolution_at || null,
+          blocked_at: new Date().toISOString()
+        })
+      } else {
+        // Close open block records if transitioning away from bloqueada
+        await (supabase.from('task_blocks') as any)
+          .update({
+            resolved_at: new Date().toISOString(),
+            resolved_by: currentUserId || null,
+            resolution_comment: extra?.resolution_comment || 'Desbloqueada'
+          })
+          .eq('task_id', taskId)
+          .is('resolved_at', null)
       }
 
       return { success: true }
@@ -577,7 +624,7 @@ export const taskService = {
     }
   },
 
-  async updateTaskProgress(taskId: string, progress: number): Promise<{ success: boolean; error?: string }> {
+  async updateTaskProgress(taskId: string, progress: number, currentVersion?: number): Promise<{ success: boolean; error?: string }> {
     if (!isSupabaseConfigured) {
       localTasksMemory = localTasksMemory.map(t => {
         if (t.id === taskId) {
@@ -585,6 +632,7 @@ export const taskService = {
             ...t,
             progress_percentage: progress,
             is_progress_manual: true,
+            version: (t.version || 1) + 1,
             updated_at: new Date().toISOString()
           }
         }
@@ -594,17 +642,27 @@ export const taskService = {
     }
 
     try {
-      const { data, error } = await (supabase.from('tasks') as any)
+      let query = (supabase.from('tasks') as any)
         .update({
           progress_percentage: progress,
           is_progress_manual: true,
           updated_at: new Date().toISOString()
         })
         .eq('id', taskId)
-        .select()
-        .single()
+
+      if (currentVersion !== undefined) {
+        query = query.eq('version', currentVersion)
+      }
+
+      const { data, error } = await query.select().single()
 
       if (error || !data) {
+        if (currentVersion !== undefined && (error?.code === 'PGRST116' || !data)) {
+          return {
+            success: false,
+            error: 'Esta tarea fue modificada por otra persona. Actualizá la información antes de volver a guardar.'
+          }
+        }
         console.error('[taskService.updateTaskProgress] Error:', error)
         return { success: false, error: error?.message || 'No se pudo actualizar el progreso en Supabase.' }
       }
@@ -743,7 +801,7 @@ export const taskService = {
     }
   },
 
-  async addDependency(taskId: string, blockingTaskId: string): Promise<{ success: boolean; error?: string }> {
+  async addDependency(taskId: string, blockingTaskId: string, dependencyType: DependencyType = 'blocking'): Promise<{ success: boolean; error?: string }> {
     if (taskId === blockingTaskId) {
       return { success: false, error: 'Una tarea no puede depender de sí misma.' }
     }
@@ -758,6 +816,7 @@ export const taskService = {
             id: 'dep_' + Date.now(),
             task_id: taskId,
             blocking_task_id: blockingTaskId,
+            dependency_type: dependencyType,
             created_at: new Date().toISOString(),
             blocking_task: blockingTask
           }
@@ -775,7 +834,8 @@ export const taskService = {
       const { data, error } = await (supabase.from('task_dependencies') as any)
         .insert({
           task_id: taskId,
-          blocking_task_id: blockingTaskId
+          blocking_task_id: blockingTaskId,
+          dependency_type: dependencyType
         })
         .select()
         .single()

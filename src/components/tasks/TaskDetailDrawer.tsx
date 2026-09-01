@@ -110,6 +110,9 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
     return true
   })
 
+  // Dependency Type state
+  const [selectedDependencyType, setSelectedDependencyType] = useState<'blocking' | 'coordination'>('blocking')
+
   // Save Task Details (Title, Description, Area, Priority, Dates, Assignee)
   const handleSaveDetails = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -125,15 +128,19 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
     setActionError(null)
     setIsSaving(true)
 
-    const res = await taskService.updateTaskDetails(task.id, {
-      title: editTitle.trim(),
-      description: editDescription.trim() || null,
-      area_id: editAreaId,
-      priority: editPriority,
-      due_date: editDueDate || null,
-      due_time: editDueTime || null,
-      main_assignee_id: editMainAssigneeId || null
-    })
+    const res = await taskService.updateTaskDetails(
+      task.id,
+      {
+        title: editTitle.trim(),
+        description: editDescription.trim() || null,
+        area_id: editAreaId,
+        priority: editPriority,
+        due_date: editDueDate || null,
+        due_time: editDueTime || null,
+        main_assignee_id: editMainAssigneeId || null
+      },
+      task.version
+    )
 
     setIsSaving(false)
 
@@ -209,6 +216,9 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
     newStatus: TaskStatus,
     extra?: {
       blocked_reason?: string
+      related_party?: string
+      estimated_resolution_at?: string
+      resolution_comment?: string
       third_party_name?: string
       third_party_reason?: string
       third_party_promised_date?: string
@@ -217,7 +227,7 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
   ) => {
     setActionError(null)
     setIsSaving(true)
-    const res = await taskService.updateTaskStatus(task.id, newStatus, undefined, extra)
+    const res = await taskService.updateTaskStatus(task.id, newStatus, undefined, extra, task.version)
     setIsSaving(false)
     if (res.success) {
       setShowConfirmCritical(false)
@@ -276,7 +286,7 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
   const handleAddDependency = async () => {
     if (!selectedBlockingTaskId || !canEdit) return
     setActionError(null)
-    const res = await taskService.addDependency(task.id, selectedBlockingTaskId)
+    const res = await taskService.addDependency(task.id, selectedBlockingTaskId, selectedDependencyType)
     if (res.success) {
       setSelectedBlockingTaskId('')
       onTaskUpdated()
@@ -930,12 +940,46 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
                 ) : (
                   <div className="space-y-2">
                     {task.dependencies.map(dep => (
-                      <div key={dep.id} className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-between text-xs">
+                      <div
+                        key={dep.id}
+                        className={`p-3.5 rounded-2xl border flex items-center justify-between text-xs ${
+                          dep.dependency_type === 'coordination'
+                            ? 'bg-blue-50 border-blue-200'
+                            : 'bg-amber-50 border-amber-200'
+                        }`}
+                      >
                         <div className="flex items-center gap-2 min-w-0">
-                          <Lock className="w-4 h-4 text-amber-700 flex-shrink-0" />
-                          <div className="min-w-0">
-                            <span className="font-bold text-amber-900 block truncate">{dep.blocking_task?.title || 'Tarea bloqueante'}</span>
-                            <span className="text-[10px] text-amber-700 font-medium">Estado: {dep.blocking_task?.status || 'pendiente'}</span>
+                          <Lock
+                            className={`w-4 h-4 flex-shrink-0 ${
+                              dep.dependency_type === 'coordination' ? 'text-blue-700' : 'text-amber-700'
+                            }`}
+                          />
+                          <div className="min-w-0 space-y-0.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span
+                                className={`font-bold block truncate ${
+                                  dep.dependency_type === 'coordination' ? 'text-blue-900' : 'text-amber-900'
+                                }`}
+                              >
+                                {dep.blocking_task?.title || 'Tarea vinculada'}
+                              </span>
+                              <span
+                                className={`px-1.5 py-0.2 rounded text-[9px] font-bold uppercase ${
+                                  dep.dependency_type === 'coordination'
+                                    ? 'bg-blue-200/70 text-blue-800'
+                                    : 'bg-amber-200/70 text-amber-900'
+                                }`}
+                              >
+                                {dep.dependency_type === 'coordination' ? 'Coordinación' : 'Bloqueante'}
+                              </span>
+                            </div>
+                            <span
+                              className={`text-[10px] font-medium block ${
+                                dep.dependency_type === 'coordination' ? 'text-blue-700' : 'text-amber-700'
+                              }`}
+                            >
+                              Estado: {dep.blocking_task?.status || 'pendiente'}
+                            </span>
                           </div>
                         </div>
                         {canEdit && (
@@ -980,32 +1024,82 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
                 )}
               </div>
 
+              {/* Block History Log */}
+              {task.blocks && task.blocks.length > 0 && (
+                <div className="space-y-2 pt-2 border-t border-[#F0EBE1]">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#71717A]">
+                    Historial de Bloqueos ({task.blocks.length})
+                  </h4>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {task.blocks.map(b => (
+                      <div key={b.id} className="p-3 rounded-2xl bg-zinc-50 border border-zinc-200 text-xs space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className={`font-bold ${b.resolved_at ? 'text-zinc-700' : 'text-red-700'}`}>
+                            {b.resolved_at ? 'Bloqueo Resuelto' : 'Bloqueo Activo'}
+                          </span>
+                          <span className="text-[10px] text-zinc-400">
+                            {new Date(b.blocked_at).toLocaleDateString([], { day: '2-digit', month: 'short' })}
+                          </span>
+                        </div>
+                        <p className="text-zinc-700"><strong className="text-zinc-900">Motivo:</strong> {b.reason}</p>
+                        {b.related_party && (
+                          <p className="text-zinc-500 text-[11px]">Proveedor / Tercero: {b.related_party}</p>
+                        )}
+                        {b.resolved_at && (
+                          <div className="text-[11px] text-green-700 pt-1 border-t border-zinc-200/60 flex items-center justify-between">
+                            <span>Resuelto: {b.resolution_comment || 'Desbloqueada'}</span>
+                            <span>{new Date(b.resolved_at).toLocaleDateString([], { day: '2-digit', month: 'short' })}</span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {canEdit && (
-                <div className="pt-2">
-                  <label className="block text-xs font-bold uppercase tracking-wider text-[#71717A] mb-1.5">
+                <div className="pt-2 space-y-2">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-[#71717A]">
                     Declarar nueva dependencia
                   </label>
-                  <div className="flex gap-2">
-                    <select
-                      value={selectedBlockingTaskId}
-                      onChange={(e) => setSelectedBlockingTaskId(e.target.value)}
-                      className="flex-1 p-3 bg-[#FAF7F2] border border-[#E8E2D9] rounded-2xl text-xs font-semibold text-[#18181B]"
-                    >
-                      <option value="">Seleccionar tarea que debe terminarse antes...</option>
-                      {allTasks
-                        .filter(t => t.id !== task.id && !t.archived_at)
-                        .map(t => (
-                          <option key={t.id} value={t.id}>
-                            {t.title} ({t.status})
-                          </option>
-                        ))}
-                    </select>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div className="sm:col-span-2">
+                      <select
+                        value={selectedBlockingTaskId}
+                        onChange={(e) => setSelectedBlockingTaskId(e.target.value)}
+                        className="w-full p-2.5 bg-[#FAF7F2] border border-[#E8E2D9] rounded-xl text-xs font-semibold text-[#18181B]"
+                      >
+                        <option value="">Seleccionar tarea vinculada...</option>
+                        {allTasks
+                          .filter(t => t.id !== task.id && !t.archived_at)
+                          .map(t => (
+                            <option key={t.id} value={t.id}>
+                              {t.title} ({t.status})
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <select
+                        value={selectedDependencyType}
+                        onChange={(e) => setSelectedDependencyType(e.target.value as any)}
+                        className="w-full p-2.5 bg-[#FAF7F2] border border-[#E8E2D9] rounded-xl text-xs font-semibold text-[#18181B]"
+                      >
+                        <option value="blocking">Bloqueante (Estricta)</option>
+                        <option value="coordination">Coordinación (Informativa)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end pt-1">
                     <button
                       type="button"
                       onClick={handleAddDependency}
-                      className="px-4 py-3 bg-[#18181B] hover:bg-black text-white text-xs font-bold rounded-2xl transition-all cursor-pointer"
+                      disabled={!selectedBlockingTaskId}
+                      className="px-4 py-2 bg-[#18181B] hover:bg-black text-white text-xs font-bold rounded-xl transition-all cursor-pointer disabled:opacity-50"
                     >
-                      Vincular
+                      Vincular Dependencia
                     </button>
                   </div>
                 </div>

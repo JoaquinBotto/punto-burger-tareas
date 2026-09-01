@@ -5,6 +5,7 @@ export * from './database.types'
 export type UserRole = 'admin' | 'responsable' | 'colaborador'
 export type TaskPriority = 'critica' | 'alta' | 'media' | 'baja'
 export type TaskStatus = 'pendiente' | 'en_progreso' | 'bloqueada' | 'esperando_tercero' | 'en_revision' | 'completada' | 'cancelada'
+export type DependencyType = 'blocking' | 'coordination'
 
 export type AppSettings = Database['public']['Tables']['app_settings']['Row']
 export type Profile = Database['public']['Tables']['profiles']['Row'] & {
@@ -18,11 +19,33 @@ export type Task = Database['public']['Tables']['tasks']['Row'] & {
 export type Subtask = Database['public']['Tables']['subtasks']['Row']
 export type Comment = Database['public']['Tables']['comments']['Row']
 export type Attachment = Database['public']['Tables']['attachments']['Row']
-export type TaskDependency = Database['public']['Tables']['task_dependencies']['Row']
+export interface TaskDependency {
+  id: string
+  task_id: string
+  blocking_task_id: string
+  dependency_type: DependencyType
+  created_at: string
+}
 export type Tag = Database['public']['Tables']['tags']['Row']
 export type Notification = Database['public']['Tables']['notifications']['Row']
 export type ActivityLog = Database['public']['Tables']['activity_log']['Row']
 export type RecurringTaskRule = Database['public']['Tables']['recurring_task_rules']['Row']
+
+export interface TaskBlock {
+  id: string
+  task_id: string
+  blocked_by: string | null
+  reason: string
+  related_party: string | null
+  estimated_resolution_at: string | null
+  blocked_at: string
+  resolved_at: string | null
+  resolved_by: string | null
+  resolution_comment: string | null
+  created_at: string
+  blocked_by_profile?: Profile
+  resolved_by_profile?: Profile
+}
 
 // Extended Task with Relations
 export interface TaskWithDetails extends Task {
@@ -33,6 +56,7 @@ export interface TaskWithDetails extends Task {
   comments?: (Comment & { profile?: Profile })[]
   attachments?: Attachment[]
   dependencies?: (TaskDependency & { blocking_task?: Task })[]
+  blocks?: TaskBlock[]
   tags?: Tag[]
   created_by_profile?: Profile
 }
