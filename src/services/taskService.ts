@@ -4,6 +4,40 @@ import { DEMO_TASKS, INITIAL_AREAS, DEMO_PROFILES } from '../data/demoData'
 
 let localTasksMemory: TaskWithDetails[] = JSON.parse(JSON.stringify(DEMO_TASKS))
 
+// Valid columns in the Postgres 'tasks' table
+const VALID_TASK_COLUMNS = new Set([
+  'title',
+  'description',
+  'area_id',
+  'main_assignee_id',
+  'priority',
+  'status',
+  'progress_percentage',
+  'is_progress_manual',
+  'due_date',
+  'due_time',
+  'third_party_name',
+  'third_party_reason',
+  'third_party_promised_date',
+  'third_party_contact',
+  'blocked_reason',
+  'blocked_at',
+  'completed_by',
+  'completed_at',
+  'archived_at',
+  'archived_by',
+  'is_recurring',
+  'recurring_rule_id',
+  'recurrence_occurrence_date',
+  'is_demo',
+  'version'
+])
+
+function sanitizeColumnValue(val: any): any {
+  if (val === '' || val === undefined) return null
+  return val
+}
+
 export const taskService = {
   async getTasks(filters?: Partial<TaskFilters>): Promise<TaskWithDetails[]> {
     if (!isSupabaseConfigured) {
@@ -93,8 +127,8 @@ export const taskService = {
 
       const { data, error } = await query
       if (error) {
-        console.error('[taskService] Error fetching tasks:', error)
-        return localTasksMemory
+        console.error('[taskService.getTasks] Error fetching tasks:', error)
+        return []
       }
 
       // Map relational structures
@@ -106,8 +140,8 @@ export const taskService = {
 
       return formatted as TaskWithDetails[]
     } catch (err) {
-      console.error('[taskService] Exception querying tasks:', err)
-      return localTasksMemory
+      console.error('[taskService.getTasks] Exception querying tasks:', err)
+      return []
     }
   },
 
@@ -119,7 +153,7 @@ export const taskService = {
     priority: TaskPriority
     due_date?: string | null
     due_time?: string | null
-    created_by: string
+    created_by?: string
     subtasks?: string[]
     third_party_name?: string | null
     third_party_reason?: string | null
@@ -164,7 +198,7 @@ export const taskService = {
         third_party_contact: payload.third_party_contact || null,
         blocked_reason: null,
         blocked_at: null,
-        created_by: payload.created_by,
+        created_by: payload.created_by || 'u1',
         completed_by: null,
         completed_at: null,
         archived_at: null,
@@ -188,45 +222,67 @@ export const taskService = {
     }
 
     try {
-      // 1. Insert task
+      const { data: authData } = await supabase.auth.getUser()
+      const currentUserId = authData.user?.id
+
+      if (!currentUserId) {
+        return { success: false, error: 'Sesión no válida o expirada. Por favor, vuelve a iniciar sesión.' }
+      }
+
+      // 1. Prepare sanitized insert object
+      const insertPayload: Record<string, any> = {
+        title: payload.title.trim(),
+        description: sanitizeColumnValue(payload.description),
+        area_id: payload.area_id,
+        main_assignee_id: sanitizeColumnValue(payload.main_assignee_id),
+        priority: payload.priority || 'alta',
+        status: 'pendiente',
+        progress_percentage: 0,
+        is_progress_manual: (payload.subtasks?.length || 0) === 0,
+        due_date: sanitizeColumnValue(payload.due_date),
+        due_time: sanitizeColumnValue(payload.due_time),
+        third_party_name: sanitizeColumnValue(payload.third_party_name),
+        third_party_reason: sanitizeColumnValue(payload.third_party_reason),
+        third_party_promised_date: sanitizeColumnValue(payload.third_party_promised_date),
+        third_party_contact: sanitizeColumnValue(payload.third_party_contact),
+        created_by: currentUserId
+      }
+
+      // 2. Insert task row
       const { data: taskData, error: taskError } = await (supabase.from('tasks') as any)
-        .insert({
-          title: payload.title,
-          description: payload.description || null,
-          area_id: payload.area_id,
-          main_assignee_id: payload.main_assignee_id || null,
-          priority: payload.priority,
-          status: 'pendiente',
-          progress_percentage: 0,
-          is_progress_manual: (payload.subtasks?.length || 0) === 0,
-          due_date: payload.due_date || null,
-          due_time: payload.due_time || null,
-          third_party_name: payload.third_party_name || null,
-          third_party_reason: payload.third_party_reason || null,
-          third_party_promised_date: payload.third_party_promised_date || null,
-          third_party_contact: payload.third_party_contact || null,
-          created_by: payload.created_by
-        })
-        .select()
+        .insert(insertPayload)
+        .select(`
+          *,
+          area:areas(*),
+          main_assignee:profiles!tasks_main_assignee_id_fkey(*)
+        `)
         .single()
 
       if (taskError || !taskData) {
-        return { success: false, error: taskError?.message || 'Error al crear la tarea' }
+        console.error('[taskService.createTask] Supabase Insert Error:', taskError)
+        return { success: false, error: taskError?.message || 'Error al crear la tarea en la base de datos.' }
       }
 
-      const newTaskId = (taskData as any).id
+      const newTaskId = taskData.id
+      let createdSubtasks: Subtask[] = []
 
-      // 2. Insert subtasks
+      // 3. Insert subtasks if provided
       if (payload.subtasks && payload.subtasks.length > 0) {
         const subtasksToInsert = payload.subtasks.map((stTitle, idx) => ({
           task_id: newTaskId,
-          title: stTitle,
+          title: stTitle.trim(),
           display_order: idx + 1
         }))
-        await (supabase.from('subtasks') as any).insert(subtasksToInsert)
+        const { data: stData, error: stError } = await (supabase.from('subtasks') as any)
+          .insert(subtasksToInsert)
+          .select()
+
+        if (!stError && stData) {
+          createdSubtasks = stData as Subtask[]
+        }
       }
 
-      // 3. Insert additional assignees
+      // 4. Insert additional assignees if provided
       if (payload.additional_assignees && payload.additional_assignees.length > 0) {
         const assigneesToInsert = payload.additional_assignees.map(profId => ({
           task_id: newTaskId,
@@ -235,13 +291,22 @@ export const taskService = {
         await (supabase.from('task_assignees') as any).insert(assigneesToInsert)
       }
 
-      return { success: true, data: taskData as any }
+      const completeTask: TaskWithDetails = {
+        ...taskData,
+        subtasks: createdSubtasks,
+        comments: [],
+        attachments: [],
+        dependencies: []
+      }
+
+      return { success: true, data: completeTask }
     } catch (err: any) {
-      return { success: false, error: err.message || 'Error al guardar la tarea' }
+      console.error('[taskService.createTask] Exception:', err)
+      return { success: false, error: err.message || 'Error inesperado al crear la tarea.' }
     }
   },
 
-  async updateTask(id: string, updates: Partial<Task>, currentVersion?: number): Promise<{ success: boolean; error?: string }> {
+  async updateTask(id: string, updates: Partial<TaskWithDetails>, currentVersion?: number): Promise<{ success: boolean; error?: string }> {
     if (!isSupabaseConfigured) {
       localTasksMemory = localTasksMemory.map(t => {
         if (t.id === id) {
@@ -257,26 +322,41 @@ export const taskService = {
       return { success: true }
     }
 
-    let query = (supabase.from('tasks') as any)
-      .update({
-        ...updates,
+    try {
+      // Filter updates to only valid table columns
+      const sanitizedUpdates: Record<string, any> = {
         updated_at: new Date().toISOString()
-      })
-      .eq('id', id)
+      }
 
-    // Optimistic Concurrency Control
-    if (currentVersion !== undefined) {
-      query = query.eq('version', currentVersion)
-    }
+      for (const [key, value] of Object.entries(updates)) {
+        if (VALID_TASK_COLUMNS.has(key)) {
+          sanitizedUpdates[key] = sanitizeColumnValue(value)
+        }
+      }
 
-    const { error } = await query
-    if (error) {
-      return { success: false, error: error.message }
+      let query = (supabase.from('tasks') as any)
+        .update(sanitizedUpdates)
+        .eq('id', id)
+
+      // Optimistic Concurrency Control if version is provided
+      if (currentVersion !== undefined) {
+        query = query.eq('version', currentVersion)
+      }
+
+      const { error } = await query
+      if (error) {
+        console.error('[taskService.updateTask] Update error:', error)
+        return { success: false, error: error.message || 'No se pudo actualizar la tarea.' }
+      }
+
+      return { success: true }
+    } catch (err: any) {
+      console.error('[taskService.updateTask] Exception:', err)
+      return { success: false, error: err.message || 'Error inesperado al actualizar la tarea.' }
     }
-    return { success: true }
   },
 
-  async toggleSubtask(taskId: string, subtaskId: string, isCompleted: boolean, userId: string): Promise<{ success: boolean; progress?: number; error?: string }> {
+  async toggleSubtask(taskId: string, subtaskId: string, isCompleted: boolean, _userId?: string): Promise<{ success: boolean; progress?: number; error?: string }> {
     if (!isSupabaseConfigured) {
       let updatedProgress = 0
       localTasksMemory = localTasksMemory.map(t => {
@@ -286,7 +366,7 @@ export const taskService = {
               return {
                 ...s,
                 is_completed: isCompleted,
-                completed_by: isCompleted ? userId : null,
+                completed_by: isCompleted ? 'u1' : null,
                 completed_at: isCompleted ? new Date().toISOString() : null,
                 updated_at: new Date().toISOString()
               }
@@ -311,17 +391,27 @@ export const taskService = {
       return { success: true, progress: updatedProgress }
     }
 
-    const { error } = await (supabase.from('subtasks') as any)
-      .update({
-        is_completed: isCompleted,
-        completed_by: isCompleted ? userId : null,
-        completed_at: isCompleted ? new Date().toISOString() : null,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', subtaskId)
+    try {
+      const { data: authData } = await supabase.auth.getUser()
+      const currentUserId = authData.user?.id
 
-    if (error) return { success: false, error: error.message }
-    return { success: true }
+      const { error } = await (supabase.from('subtasks') as any)
+        .update({
+          is_completed: isCompleted,
+          completed_by: isCompleted ? currentUserId : null,
+          completed_at: isCompleted ? new Date().toISOString() : null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', subtaskId)
+
+      if (error) {
+        console.error('[taskService.toggleSubtask] Error:', error)
+        return { success: false, error: error.message }
+      }
+      return { success: true }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
   },
 
   async addSubtask(taskId: string, title: string, displayOrder: number): Promise<{ success: boolean; data?: Subtask; error?: string }> {
@@ -357,17 +447,24 @@ export const taskService = {
       return { success: true, data: newSubtask }
     }
 
-    const { data, error } = await (supabase.from('subtasks') as any)
-      .insert({
-        task_id: taskId,
-        title,
-        display_order: displayOrder
-      })
-      .select()
-      .single()
+    try {
+      const { data, error } = await (supabase.from('subtasks') as any)
+        .insert({
+          task_id: taskId,
+          title: title.trim(),
+          display_order: displayOrder
+        })
+        .select()
+        .single()
 
-    if (error) return { success: false, error: error.message }
-    return { success: true, data: data as unknown as Subtask }
+      if (error) {
+        console.error('[taskService.addSubtask] Error:', error)
+        return { success: false, error: error.message }
+      }
+      return { success: true, data: data as unknown as Subtask }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
   },
 
   async deleteSubtask(taskId: string, subtaskId: string): Promise<{ success: boolean; error?: string }> {
@@ -390,15 +487,22 @@ export const taskService = {
       return { success: true }
     }
 
-    const { error } = await supabase.from('subtasks').delete().eq('id', subtaskId)
-    if (error) return { success: false, error: error.message }
-    return { success: true }
+    try {
+      const { error } = await supabase.from('subtasks').delete().eq('id', subtaskId)
+      if (error) {
+        console.error('[taskService.deleteSubtask] Error:', error)
+        return { success: false, error: error.message }
+      }
+      return { success: true }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
   },
 
   async updateTaskStatus(
     taskId: string,
     newStatus: TaskStatus,
-    userId: string,
+    _userId?: string,
     extra?: {
       blocked_reason?: string
       third_party_name?: string
@@ -407,6 +511,9 @@ export const taskService = {
       third_party_contact?: string
     }
   ): Promise<{ success: boolean; error?: string }> {
+    const { data: authData } = await supabase.auth.getUser()
+    const currentUserId = authData.user?.id
+
     const updates: Partial<Task> = {
       status: newStatus,
       updated_at: new Date().toISOString()
@@ -415,7 +522,7 @@ export const taskService = {
     if (newStatus === 'completada') {
       updates.progress_percentage = 100
       updates.completed_at = new Date().toISOString()
-      updates.completed_by = userId
+      updates.completed_by = currentUserId || null
     } else {
       updates.completed_at = null
       updates.completed_by = null
@@ -439,10 +546,13 @@ export const taskService = {
     return this.updateTask(taskId, updates)
   },
 
-  async archiveTask(taskId: string, userId: string): Promise<{ success: boolean; error?: string }> {
+  async archiveTask(taskId: string, _userId?: string): Promise<{ success: boolean; error?: string }> {
+    const { data: authData } = await supabase.auth.getUser()
+    const currentUserId = authData.user?.id
+
     return this.updateTask(taskId, {
       archived_at: new Date().toISOString(),
-      archived_by: userId
+      archived_by: currentUserId || null
     })
   },
 
@@ -453,13 +563,13 @@ export const taskService = {
     })
   },
 
-  async addComment(taskId: string, profileId: string, content: string): Promise<{ success: boolean; data?: Comment; error?: string }> {
+  async addComment(taskId: string, _profileId: string, content: string): Promise<{ success: boolean; data?: Comment; error?: string }> {
     if (!isSupabaseConfigured) {
-      const author = DEMO_PROFILES.find(p => p.id === profileId)
+      const author = DEMO_PROFILES[0]
       const newComment: Comment & { profile?: any } = {
         id: 'c_' + Date.now(),
         task_id: taskId,
-        profile_id: profileId,
+        profile_id: 'u1',
         content,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -478,17 +588,31 @@ export const taskService = {
       return { success: true, data: newComment }
     }
 
-    const { data, error } = await (supabase.from('comments') as any)
-      .insert({
-        task_id: taskId,
-        profile_id: profileId,
-        content
-      })
-      .select('*, profile:profiles(*)')
-      .single()
+    try {
+      const { data: authData } = await supabase.auth.getUser()
+      const currentUserId = authData.user?.id
 
-    if (error) return { success: false, error: error.message }
-    return { success: true, data: data as any }
+      if (!currentUserId) {
+        return { success: false, error: 'Sesión no válida. Vuelve a iniciar sesión.' }
+      }
+
+      const { data, error } = await (supabase.from('comments') as any)
+        .insert({
+          task_id: taskId,
+          profile_id: currentUserId,
+          content: content.trim()
+        })
+        .select('*, profile:profiles(*)')
+        .single()
+
+      if (error) {
+        console.error('[taskService.addComment] Error:', error)
+        return { success: false, error: error.message }
+      }
+      return { success: true, data: data as any }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
   },
 
   async addDependency(taskId: string, blockingTaskId: string): Promise<{ success: boolean; error?: string }> {
@@ -519,14 +643,21 @@ export const taskService = {
       return { success: true }
     }
 
-    const { error } = await (supabase.from('task_dependencies') as any)
-      .insert({
-        task_id: taskId,
-        blocking_task_id: blockingTaskId
-      })
+    try {
+      const { error } = await (supabase.from('task_dependencies') as any)
+        .insert({
+          task_id: taskId,
+          blocking_task_id: blockingTaskId
+        })
 
-    if (error) return { success: false, error: error.message }
-    return { success: true }
+      if (error) {
+        console.error('[taskService.addDependency] Error:', error)
+        return { success: false, error: error.message }
+      }
+      return { success: true }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
   },
 
   async removeDependency(dependencyId: string): Promise<{ success: boolean; error?: string }> {
@@ -538,8 +669,15 @@ export const taskService = {
       return { success: true }
     }
 
-    const { error } = await supabase.from('task_dependencies').delete().eq('id', dependencyId)
-    if (error) return { success: false, error: error.message }
-    return { success: true }
+    try {
+      const { error } = await supabase.from('task_dependencies').delete().eq('id', dependencyId)
+      if (error) {
+        console.error('[taskService.removeDependency] Error:', error)
+        return { success: false, error: error.message }
+      }
+      return { success: true }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
   }
 }

@@ -57,6 +57,7 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
   const [selectedBlockingTaskId, setSelectedBlockingTaskId] = useState('')
   const [manualProgress, setManualProgress] = useState(task?.progress_percentage || 0)
   const [isSaving, setIsSaving] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   if (!isOpen || !task) return null
 
@@ -68,32 +69,52 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
   // Subtask Toggle
   const handleToggleSubtask = async (subtaskId: string, isCompleted: boolean) => {
     if (!canEdit) return
-    await taskService.toggleSubtask(task.id, subtaskId, isCompleted, user?.id || 'u1')
-    onTaskUpdated()
+    setActionError(null)
+    const res = await taskService.toggleSubtask(task.id, subtaskId, isCompleted)
+    if (res.success) {
+      onTaskUpdated()
+    } else {
+      setActionError(res.error || 'No se pudo actualizar el paso.')
+    }
   }
 
   // Add Subtask
   const handleAddSubtask = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newSubtaskTitle.trim() || !canEdit) return
-    await taskService.addSubtask(task.id, newSubtaskTitle.trim(), totalSubtasks + 1)
-    setNewSubtaskTitle('')
-    onTaskUpdated()
+    setActionError(null)
+    const res = await taskService.addSubtask(task.id, newSubtaskTitle.trim(), totalSubtasks + 1)
+    if (res.success) {
+      setNewSubtaskTitle('')
+      onTaskUpdated()
+    } else {
+      setActionError(res.error || 'No se pudo agregar la subtarea.')
+    }
   }
 
   // Delete Subtask
   const handleDeleteSubtask = async (subtaskId: string) => {
     if (!canEdit) return
-    await taskService.deleteSubtask(task.id, subtaskId)
-    onTaskUpdated()
+    setActionError(null)
+    const res = await taskService.deleteSubtask(task.id, subtaskId)
+    if (res.success) {
+      onTaskUpdated()
+    } else {
+      setActionError(res.error || 'No se pudo eliminar la subtarea.')
+    }
   }
 
   // Manual Progress Change
   const handleManualProgressCommit = async (val: number) => {
     if (!canEdit || totalSubtasks > 0) return
+    setActionError(null)
     setManualProgress(val)
-    await taskService.updateTask(task.id, { progress_percentage: val, is_progress_manual: true })
-    onTaskUpdated()
+    const res = await taskService.updateTask(task.id, { progress_percentage: val, is_progress_manual: true })
+    if (res.success) {
+      onTaskUpdated()
+    } else {
+      setActionError(res.error || 'No se pudo actualizar el avance.')
+    }
   }
 
   // Complete Task Action
@@ -115,32 +136,47 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
       third_party_contact?: string
     }
   ) => {
+    setActionError(null)
     setIsSaving(true)
-    await taskService.updateTaskStatus(task.id, newStatus, user?.id || 'u1', extra)
+    const res = await taskService.updateTaskStatus(task.id, newStatus, undefined, extra)
     setIsSaving(false)
-    setShowConfirmCritical(false)
-    setStateModalTarget(null)
-    onTaskUpdated()
+    if (res.success) {
+      setShowConfirmCritical(false)
+      setStateModalTarget(null)
+      onTaskUpdated()
+    } else {
+      setActionError(res.error || 'No se pudo cambiar el estado de la tarea.')
+    }
   }
 
   // Archive & Restore
   const handleArchive = async () => {
     if (!isAdmin) return
+    setActionError(null)
     setIsSaving(true)
-    await taskService.archiveTask(task.id, user?.id || 'u1')
+    const res = await taskService.archiveTask(task.id)
     setIsSaving(false)
-    setShowConfirmArchive(false)
-    onTaskUpdated()
-    onClose()
+    if (res.success) {
+      setShowConfirmArchive(false)
+      onTaskUpdated()
+      onClose()
+    } else {
+      setActionError(res.error || 'No se pudo archivar la tarea.')
+    }
   }
 
   const handleRestore = async () => {
     if (!isAdmin) return
+    setActionError(null)
     setIsSaving(true)
-    await taskService.restoreTask(task.id)
+    const res = await taskService.restoreTask(task.id)
     setIsSaving(false)
-    setShowConfirmRestore(false)
-    onTaskUpdated()
+    if (res.success) {
+      setShowConfirmRestore(false)
+      onTaskUpdated()
+    } else {
+      setActionError(res.error || 'No se pudo restaurar la tarea.')
+    }
   }
 
   // Add Comment
@@ -223,6 +259,19 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
             <X className="w-6 h-6" />
           </button>
         </div>
+
+        {/* Action Error Banner if any */}
+        {actionError && (
+          <div className="px-6 py-3 bg-red-50 border-b border-red-200 text-xs text-red-700 flex items-center justify-between gap-2 animate-in fade-in">
+            <span className="font-semibold">{actionError}</span>
+            <button
+              onClick={() => setActionError(null)}
+              className="text-xs text-red-600 hover:text-red-900 font-bold"
+            >
+              Cerrar
+            </button>
+          </div>
+        )}
 
         {/* Quick Action Bar */}
         <div className="p-3 sm:px-6 bg-white border-b border-[#F0EBE1] flex items-center gap-2 overflow-x-auto">
