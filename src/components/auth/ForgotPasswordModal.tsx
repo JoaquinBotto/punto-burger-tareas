@@ -23,7 +23,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({ onBack
     }
 
     setIsSubmitting(true)
-    const result = await sendPasswordReset(email.trim())
+    const result = await sendPasswordReset(email.trim().toLowerCase())
     setIsSubmitting(false)
 
     if (result.success) {

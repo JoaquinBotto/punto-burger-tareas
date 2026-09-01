@@ -142,17 +142,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     try {
+      const cleanEmail = email.trim().toLowerCase()
       const { data, error: loginErr } = await supabase.auth.signInWithPassword({
-        email,
+        email: cleanEmail,
         password,
       })
 
       if (loginErr) {
         let userMessage = 'Error al iniciar sesión. Verifica tus credenciales.'
-        if (loginErr.message.includes('Invalid login credentials')) {
+        const msg = loginErr.message.toLowerCase()
+        if (msg.includes('invalid login credentials')) {
           userMessage = 'Correo o contraseña incorrectos.'
-        } else if (loginErr.message.includes('Email not confirmed')) {
+        } else if (msg.includes('email not confirmed')) {
           userMessage = 'Por favor, confirma tu correo electrónico antes de ingresar.'
+        } else if (msg.includes('user not found')) {
+          userMessage = 'No existe una cuenta registrada con este correo.'
+        } else if (msg.includes('too many requests') || msg.includes('rate limit')) {
+          userMessage = 'Demasiados intentos fallidos. Esperá unos minutos antes de reintentar.'
+        } else if (msg.includes('user is banned') || msg.includes('suspended')) {
+          userMessage = 'Tu cuenta ha sido suspendida.'
         }
         setError(userMessage)
         return { success: false, error: userMessage }

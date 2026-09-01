@@ -25,7 +25,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onForgotPassword }) => {
     }
 
     setIsSubmitting(true)
-    const result = await login(email.trim(), password)
+    const result = await login(email.trim().toLowerCase(), password)
     setIsSubmitting(false)
 
     if (!result.success && result.error) {
