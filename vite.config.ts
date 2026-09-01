@@ -36,11 +36,11 @@ export default defineConfig(({ mode, command }) => {
         devOptions: {
           enabled: false
         },
-        includeAssets: ['favicon.svg', '_headers'],
+        includeAssets: ['favicon.png', 'favicon.ico', 'apple-touch-icon.png', 'logo.png', '_headers'],
         manifest: {
           name: 'Punto Burger | Tareas',
-          short_name: 'Punto Tareas',
-          description: 'Gestión operativa de tareas y apertura de Punto Burger',
+          short_name: 'PB Tareas',
+          description: 'Gestión operativa de tareas y apertura de Punto Burger — food drinks & coffee',
           theme_color: '#C92A2A',
           background_color: '#FAF7F2',
           display: 'standalone',
@@ -48,15 +48,21 @@ export default defineConfig(({ mode, command }) => {
           start_url: '/',
           icons: [
             {
-              src: '/favicon.svg',
-              sizes: 'any',
-              type: 'image/svg+xml',
+              src: '/pwa-192x192.png',
+              sizes: '192x192',
+              type: 'image/png',
               purpose: 'any'
             },
             {
-              src: '/favicon.svg',
-              sizes: 'any',
-              type: 'image/svg+xml',
+              src: '/pwa-512x512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'any'
+            },
+            {
+              src: '/pwa-maskable.png',
+              sizes: '512x512',
+              type: 'image/png',
               purpose: 'maskable'
             }
           ]

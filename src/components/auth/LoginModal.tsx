@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
-import { Flame, Lock, Mail, AlertCircle, Loader2, ArrowRight } from 'lucide-react'
+import { Lock, Mail, AlertCircle, Loader2, ArrowRight } from 'lucide-react'
+import puntoBurgerLogo from '../../assets/brand/punto-burger-logo.png'
 
 interface LoginModalProps {
   onForgotPassword?: () => void
@@ -39,18 +40,19 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onForgotPassword }) => {
       {/* Container */}
       <div className="w-full max-w-md">
         
-        {/* Brand Header */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[#C92A2A] text-white shadow-lg mb-4 ring-4 ring-[#C92A2A]/20">
-            <Flame className="w-10 h-10" />
+        {/* Official Brand Header */}
+        <div className="text-center mb-6">
+          <div className="flex justify-center mb-3">
+            <img
+              src={puntoBurgerLogo}
+              alt="Punto Burger — food drinks & coffee"
+              className="h-16 sm:h-20 w-auto object-contain max-w-full drop-shadow-xs"
+            />
           </div>
-          <h1 className="text-3xl font-black tracking-tight text-[#18181B]">
-            PUNTO BURGER
-          </h1>
-          <div className="inline-block mt-1 px-3 py-0.5 bg-[#FAF0F0] text-[#C92A2A] rounded-full text-xs font-semibold tracking-wide border border-[#F5D0D0]">
-            SISTEMA OPERATIVO & TAREAS
+          <div className="inline-block mt-1 px-3.5 py-0.5 bg-[#FAF0F0] text-[#C92A2A] rounded-full text-xs font-bold tracking-wider uppercase border border-[#F5D0D0]">
+            Tablero Operativo & Tareas
           </div>
-          <p className="mt-2 text-sm text-[#71717A]">
+          <p className="mt-2 text-xs sm:text-sm text-[#71717A]">
             Ingresa con tus credenciales de equipo para continuar
           </p>
         </div>
@@ -82,7 +84,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onForgotPassword }) => {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="ejemplo@puntoburger.com"
-                  className="w-full pl-11 pr-4 py-3 bg-[#FAF7F2] border border-[#E8E2D9] rounded-2xl text-[#18181B] text-base placeholder-[#A1A1AA] focus:outline-none focus:ring-2 focus:ring-[#C92A2A] focus:bg-white transition-all"
+                  className="w-full pl-11 pr-4 py-3 bg-[#FAF7F2] border border-[#E8E2D9] rounded-2xl text-[#18181B] text-sm sm:text-base placeholder-[#A1A1AA] focus:outline-none focus:ring-2 focus:ring-[#C92A2A] focus:bg-white transition-all"
                   autoComplete="email"
                 />
               </div>
@@ -98,7 +100,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onForgotPassword }) => {
                   <button
                     type="button"
                     onClick={onForgotPassword}
-                    className="text-xs font-semibold text-[#C92A2A] hover:underline"
+                    className="text-xs font-semibold text-[#C92A2A] hover:underline cursor-pointer"
                   >
                     ¿Olvidaste tu clave?
                   </button>
@@ -114,13 +116,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onForgotPassword }) => {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full pl-11 pr-4 py-3 bg-[#FAF7F2] border border-[#E8E2D9] rounded-2xl text-[#18181B] text-base placeholder-[#A1A1AA] focus:outline-none focus:ring-2 focus:ring-[#C92A2A] focus:bg-white transition-all"
+                  className="w-full pl-11 pr-4 py-3 bg-[#FAF7F2] border border-[#E8E2D9] rounded-2xl text-[#18181B] text-sm sm:text-base placeholder-[#A1A1AA] focus:outline-none focus:ring-2 focus:ring-[#C92A2A] focus:bg-white transition-all"
                   autoComplete="current-password"
                 />
               </div>
             </div>
 
-            {/* Submit Button (Extra large touch target for mobile) */}
+            {/* Submit Button */}
             <button
               type="submit"
               disabled={isSubmitting}
@@ -150,7 +152,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onForgotPassword }) => {
 
         {/* Footer */}
         <p className="mt-8 text-center text-xs text-[#A1A1AA]">
-          © {new Date().getFullYear()} Punto Burger • Todos los derechos reservados
+          © {new Date().getFullYear()} Punto Burger • food drinks & coffee
         </p>
       </div>
     </div>

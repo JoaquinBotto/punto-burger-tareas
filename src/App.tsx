@@ -6,7 +6,6 @@ import { OfflineBanner } from './components/common/OfflineBanner'
 import { LoginModal } from './components/auth/LoginModal'
 import { ForgotPasswordModal } from './components/auth/ForgotPasswordModal'
 import { UpdatePasswordModal } from './components/auth/UpdatePasswordModal'
-import { SetupAdminNotice } from './components/auth/SetupAdminNotice'
 import { DashboardView } from './components/dashboard/DashboardView'
 import { MyDayView } from './components/myday/MyDayView'
 import { TaskList } from './components/tasks/TaskList'
@@ -15,6 +14,11 @@ import { TaskDetailDrawer } from './components/tasks/TaskDetailDrawer'
 import { NotificationsDrawer } from './components/notifications/NotificationsDrawer'
 import { AreaManagerModal } from './components/areas/AreaManagerModal'
 import { TeamManagerModal } from './components/team/TeamManagerModal'
+import { ProgressReportModal } from './components/reports/ProgressReportModal'
+import { RecurringManagerModal } from './components/recurring/RecurringManagerModal'
+import { ArchivedTasksModal } from './components/tasks/ArchivedTasksModal'
+import { TagManagerModal } from './components/tags/TagManagerModal'
+import { AppSettingsModal } from './components/settings/AppSettingsModal'
 import { taskService } from './services/taskService'
 import { areaService } from './services/areaService'
 import { profileService } from './services/profileService'
@@ -22,7 +26,8 @@ import { notificationService } from './services/notificationService'
 import { activityService, type ActivityItem } from './services/activityService'
 import type { TaskWithDetails, Area, Profile, Notification } from './types'
 import { isSupabaseConfigured } from './lib/supabase'
-import { Loader2, AlertTriangle, Flame, Database, Plus } from 'lucide-react'
+import { Loader2, AlertTriangle, Plus } from 'lucide-react'
+import puntoBurgerIcon from './assets/brand/punto-burger-icon.png'
 
 const MainApp: React.FC = () => {
   const { session, user, profile, isAdmin, loading: authLoading } = useAuth()
@@ -55,27 +60,32 @@ const MainApp: React.FC = () => {
   const [showNotificationsDrawer, setShowNotificationsDrawer] = useState(false)
   const [showAreaManager, setShowAreaManager] = useState(false)
   const [showTeamManager, setShowTeamManager] = useState(false)
+  const [showProgressReport, setShowProgressReport] = useState(false)
+  const [showRecurringModal, setShowRecurringModal] = useState(false)
+  const [showArchivedModal, setShowArchivedModal] = useState(false)
+  const [showTagManagerModal, setShowTagManagerModal] = useState(false)
+  const [showSettingsModal, setShowSettingsModal] = useState(false)
 
   // Load project data
   const loadData = async () => {
     setIsLoadingData(true)
     try {
-      const [loadedAreas, loadedProfiles, loadedTasks, loadedActivity, loadedNotifications, unread] = await Promise.all([
-        areaService.getAreas(isAdmin),
-        profileService.getProfiles(true),
+      const [loadedTasks, loadedAreas, loadedProfiles, loadedActivity, loadedNotifications, unread] = await Promise.all([
         taskService.getTasks(),
-        activityService.getRecentActivity(20),
+        areaService.getAreas(),
+        profileService.getProfiles(),
+        activityService.getRecentActivity(15),
         notificationService.getNotifications(30),
         notificationService.getUnreadCount()
       ])
+
+      setTasks(loadedTasks)
       setAreas(loadedAreas)
       setProfiles(loadedProfiles)
-      setTasks(loadedTasks)
       setActivity(loadedActivity)
       setNotifications(loadedNotifications)
       setUnreadCount(unread)
 
-      // Refresh selected task if open
       if (selectedTask) {
         const refreshed = loadedTasks.find(t => t.id === selectedTask.id)
         if (refreshed) setSelectedTask(refreshed)
@@ -110,11 +120,15 @@ const MainApp: React.FC = () => {
     }
   }, [])
 
-  if (authLoading) {
+  if (authLoading || isLoadingData) {
     return (
       <div className="min-h-screen bg-[#FAF7F2] flex flex-col items-center justify-center p-4">
-        <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-[#C92A2A] text-white shadow-lg mb-4 animate-bounce">
-          <Flame className="w-8 h-8" />
+        <div className="flex items-center justify-center mb-4 animate-bounce">
+          <img
+            src={puntoBurgerIcon}
+            alt="Punto Burger"
+            className="w-16 h-16 object-contain drop-shadow-md"
+          />
         </div>
         <div className="flex items-center gap-2 text-[#18181B] font-bold text-base">
           <Loader2 className="w-5 h-5 animate-spin text-[#C92A2A]" />
@@ -128,14 +142,17 @@ const MainApp: React.FC = () => {
   if (!session || !user) {
     return (
       <div className="min-h-screen bg-[#FAF7F2]">
-        <OfflineBanner />
+        {showUpdatePassword && (
+          <UpdatePasswordModal
+            onSuccess={() => {
+              setShowUpdatePassword(false)
+              window.location.hash = ''
+            }}
+          />
+        )}
+
         {authView === 'login' ? (
-          <div>
-            <LoginModal onForgotPassword={() => setAuthView('forgot_password')} />
-            <div className="max-w-md mx-auto px-4 pb-12">
-              <SetupAdminNotice />
-            </div>
-          </div>
+          <LoginModal onForgotPassword={() => setAuthView('forgot_password')} />
         ) : (
           <ForgotPasswordModal onBack={() => setAuthView('login')} />
         )}
@@ -143,53 +160,42 @@ const MainApp: React.FC = () => {
     )
   }
 
-  // Account deactivated check
+  // Account inactive / disabled notice
   if (profile && !profile.is_active) {
     return (
-      <div className="min-h-screen bg-[#FAF7F2] flex flex-col items-center justify-center p-4">
-        <div className="bg-white rounded-3xl p-8 max-w-md w-full text-center border border-red-200 shadow-xl">
-          <div className="w-16 h-16 rounded-2xl bg-red-100 text-[#C92A2A] flex items-center justify-center mx-auto mb-4">
-            <AlertTriangle className="w-10 h-10" />
-          </div>
-          <h2 className="text-2xl font-black text-[#18181B] mb-2">Acceso Desactivado</h2>
-          <p className="text-sm text-[#71717A] mb-6">
-            Tu cuenta ha sido deshabilitada por la administración de Punto Burger. Contacta a un administrador para restaurar tu acceso.
+      <div className="min-h-screen bg-[#FAF7F2] flex flex-col items-center justify-center p-4 text-center">
+        <div className="bg-white p-8 rounded-3xl border border-[#E8E2D9] max-w-md shadow-xl space-y-4">
+          <AlertTriangle className="w-12 h-12 text-[#C92A2A] mx-auto" />
+          <h2 className="text-xl font-bold text-[#18181B]">Cuenta Desactivada</h2>
+          <p className="text-sm text-[#71717A]">
+            Tu acceso a Punto Burger ha sido pausado. Contacta al administrador para habilitar tu usuario.
           </p>
         </div>
       </div>
     )
   }
 
-  // Handle BottomNav clicks
+  // Filter handler from Dashboard cards
+  const handleNavigateWithFilters = (filters: { areaId?: string; status?: string; priority?: string; isBlockedOnly?: boolean }) => {
+    setActiveTaskFilters(filters)
+    setCurrentTab('tasks')
+  }
+
+  // Bottom Nav Change Handler
   const handleBottomNavChange = (tab: NavTab) => {
     if (tab === 'alerts') {
       setShowNotificationsDrawer(true)
-    } else if (tab === 'more') {
-      if (isAdmin) {
-        setShowTeamManager(true)
-      } else {
-        setShowNotificationsDrawer(true)
-      }
     } else {
       setCurrentTab(tab as MainNavTab)
     }
   }
 
-  const navigateToTasksWithFilter = (filter: {
-    status?: string
-    isBlockedOnly?: boolean
-    areaId?: string
-    priority?: string
-  }) => {
-    setActiveTaskFilters(filter)
-    setCurrentTab('tasks')
-  }
-
   return (
-    <div className="min-h-screen bg-[#FAF7F2] flex flex-col text-[#18181B]">
+    <div className="min-h-screen bg-[#FAF7F2] text-[#18181B] pb-24 md:pb-8 flex flex-col selection:bg-[#C92A2A] selection:text-white">
+      {/* Offline Status Alert */}
       <OfflineBanner />
-      
-      {/* Header */}
+
+      {/* Main Header */}
       <Header
         currentTab={currentTab}
         onTabChange={(tab) => {
@@ -200,76 +206,57 @@ const MainApp: React.FC = () => {
         onOpenAlerts={() => setShowNotificationsDrawer(true)}
         onOpenTeam={() => setShowTeamManager(true)}
         onOpenAreas={() => setShowAreaManager(true)}
+        onOpenReports={() => setShowProgressReport(true)}
+        onOpenRecurring={() => setShowRecurringModal(true)}
+        onOpenArchived={() => setShowArchivedModal(true)}
+        onOpenTags={() => setShowTagManagerModal(true)}
+        onOpenSettings={() => setShowSettingsModal(true)}
       />
 
-      {showUpdatePassword && (
-        <UpdatePasswordModal
-          onSuccess={() => {
-            setShowUpdatePassword(false)
-            alert('¡Contraseña establecida con éxito!')
-          }}
-        />
-      )}
-
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-6 sm:px-6 space-y-6">
+      {/* Main Views Container */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6">
         
-        {/* Connection Notice if demo */}
-        {!isSupabaseConfigured && (
-          <div className="p-4 rounded-3xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
-            <div className="flex items-center gap-2.5">
-              <Database className="w-5 h-5 text-amber-700 flex-shrink-0" />
-              <div>
-                <strong className="font-bold">Modo Demostración Activo:</strong> Estás explorando las tareas operativas de Punto Burger en memoria.
-              </div>
-            </div>
-            <span className="font-semibold text-amber-800 bg-amber-100/80 px-2.5 py-1 rounded-full text-[11px] self-start sm:self-auto">
-              Configura .env para persistencia en Supabase
-            </span>
-          </div>
-        )}
-
-        {/* Dynamic View rendering */}
-        {isLoadingData ? (
-          <div className="p-12 text-center text-[#71717A] flex items-center justify-center gap-2">
-            <Loader2 className="w-5 h-5 animate-spin text-[#C92A2A]" />
-            <span className="text-sm font-semibold">Cargando tablero operativo...</span>
-          </div>
-        ) : currentTab === 'dashboard' ? (
+        {/* TAB 1: DASHBOARD */}
+        {currentTab === 'dashboard' && (
           <DashboardView
             tasks={tasks}
             areas={areas}
             profiles={profiles}
             activity={activity}
             userName={profile?.full_name || 'Equipo'}
-            onSelectTask={(t) => setSelectedTask(t)}
-            onNavigateToTasksWithFilter={navigateToTasksWithFilter}
+            onSelectTask={(task) => setSelectedTask(task)}
+            onNavigateToTasksWithFilter={handleNavigateWithFilters}
           />
-        ) : currentTab === 'my_day' ? (
+        )}
+
+        {/* TAB 2: MY DAY */}
+        {currentTab === 'my_day' && (
           <MyDayView
             tasks={tasks}
-            onSelectTask={(t) => setSelectedTask(t)}
+            onSelectTask={(task) => setSelectedTask(task)}
           />
-        ) : (
+        )}
+
+        {/* TAB 3: TASKS LIST */}
+        {currentTab === 'tasks' && (
           <TaskList
             tasks={tasks}
             areas={areas}
             profiles={profiles}
-            isAdmin={isAdmin}
-            initialAreaId={activeTaskFilters.areaId || 'all'}
-            initialStatus={activeTaskFilters.status || 'all'}
-            initialPriority={activeTaskFilters.priority || 'all'}
-            initialIsBlockedOnly={Boolean(activeTaskFilters.isBlockedOnly)}
-            onTaskClick={(task) => setSelectedTask(task)}
+            initialAreaId={activeTaskFilters.areaId}
+            initialStatus={activeTaskFilters.status}
+            initialPriority={activeTaskFilters.priority}
+            initialIsBlockedOnly={activeTaskFilters.isBlockedOnly}
+            onTaskClick={(task: TaskWithDetails) => setSelectedTask(task)}
             onNewTaskClick={() => setShowQuickTaskModal(true)}
-            onOpenAreaManager={() => setShowAreaManager(true)}
+            isAdmin={isAdmin}
           />
         )}
 
       </main>
 
-      {/* Floating Action Button for Mobile Quick Task */}
-      <div className="md:hidden fixed bottom-20 right-4 z-30">
+      {/* Mobile Floating Action Button (FAB) */}
+      <div className="fixed bottom-20 right-4 z-40 md:hidden">
         <button
           type="button"
           onClick={() => setShowQuickTaskModal(true)}
@@ -334,6 +321,44 @@ const MainApp: React.FC = () => {
         isOpen={showTeamManager}
         onClose={() => setShowTeamManager(false)}
         onTeamUpdated={loadData}
+      />
+
+      {/* Progress Report Modal (Fase D) */}
+      <ProgressReportModal
+        isOpen={showProgressReport}
+        tasks={tasks}
+        areas={areas}
+        onClose={() => setShowProgressReport(false)}
+      />
+
+      {/* Recurring Task Manager Modal (Fase C) */}
+      <RecurringManagerModal
+        isOpen={showRecurringModal}
+        areas={areas}
+        profiles={profiles}
+        onClose={() => setShowRecurringModal(false)}
+        onRulesUpdated={loadData}
+      />
+
+      {/* Archived Tasks Modal (Fase E) */}
+      <ArchivedTasksModal
+        isOpen={showArchivedModal}
+        tasks={tasks}
+        onClose={() => setShowArchivedModal(false)}
+        onTaskRestored={loadData}
+      />
+
+      {/* Tag Manager Modal (Fase E) */}
+      <TagManagerModal
+        isOpen={showTagManagerModal}
+        onClose={() => setShowTagManagerModal(false)}
+        onTagsUpdated={loadData}
+      />
+
+      {/* App Settings Modal (Fase E) */}
+      <AppSettingsModal
+        isOpen={showSettingsModal}
+        onClose={() => setShowSettingsModal(false)}
       />
 
     </div>

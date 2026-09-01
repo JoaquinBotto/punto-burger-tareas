@@ -1,8 +1,7 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { formatHeaderDate } from '../../lib/dateUtils'
 import {
-  Flame,
   LogOut,
   ShieldCheck,
   UserCheck,
@@ -12,8 +11,16 @@ import {
   LayoutDashboard,
   CalendarCheck,
   CheckSquare,
-  Layers
+  Layers,
+  FileSpreadsheet,
+  Repeat,
+  Archive,
+  Tag as TagIcon,
+  Settings,
+  ChevronDown
 } from 'lucide-react'
+import puntoBurgerLogoCompact from '../../assets/brand/punto-burger-logo-compact.png'
+import puntoBurgerIcon from '../../assets/brand/punto-burger-icon.png'
 
 export type MainNavTab = 'dashboard' | 'my_day' | 'tasks'
 
@@ -24,6 +31,11 @@ interface HeaderProps {
   onOpenAlerts?: () => void
   onOpenTeam?: () => void
   onOpenAreas?: () => void
+  onOpenReports?: () => void
+  onOpenRecurring?: () => void
+  onOpenArchived?: () => void
+  onOpenTags?: () => void
+  onOpenSettings?: () => void
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -32,10 +44,16 @@ export const Header: React.FC<HeaderProps> = ({
   unreadAlertsCount = 0,
   onOpenAlerts,
   onOpenTeam,
-  onOpenAreas
+  onOpenAreas,
+  onOpenReports,
+  onOpenRecurring,
+  onOpenArchived,
+  onOpenTags,
+  onOpenSettings
 }) => {
   const { profile, isAdmin, isResponsable, logout } = useAuth()
   const todayFormatted = formatHeaderDate()
+  const [showAdminMenu, setShowAdminMenu] = useState(false)
 
   const getRoleBadge = () => {
     if (isAdmin) {
@@ -63,30 +81,35 @@ export const Header: React.FC<HeaderProps> = ({
   }
 
   return (
-    <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-[#E8E2D9] px-4 py-3 sm:px-6">
+    <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-[#E8E2D9] px-4 py-2.5 sm:px-6">
       <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
         
         {/* Left: Brand / Logo */}
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-[#C92A2A] text-white shadow-md shadow-[#C92A2A]/20">
-              <Flame className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-lg font-black tracking-tight text-[#18181B] leading-none">
-                  PUNTO BURGER
-                </span>
-                <span className="hidden sm:inline-block px-2 py-0.5 bg-[#FAF0F0] text-[#C92A2A] rounded-md text-[10px] font-extrabold uppercase tracking-wider">
-                  Tareas
-                </span>
-                <span className="text-[10px] font-mono text-zinc-400 bg-zinc-100 px-1.5 py-0.5 rounded">
-                  v1.0.5
-                </span>
-              </div>
-              <p className="text-xs text-[#71717A] font-medium hidden sm:block">
-                {todayFormatted} • Córdoba, ARG
-              </p>
+        <div className="flex items-center gap-5">
+          <div className="flex items-center gap-2.5">
+            {/* Desktop / Tablet Logo */}
+            <img
+              src={puntoBurgerLogoCompact}
+              alt="Punto Burger"
+              className="hidden sm:block h-8 md:h-9 w-auto object-contain"
+            />
+            {/* Mobile Icon */}
+            <img
+              src={puntoBurgerIcon}
+              alt="Punto Burger"
+              className="sm:hidden h-8 w-auto object-contain"
+            />
+
+            <div className="flex items-center gap-1.5">
+              <span className="px-2 py-0.5 bg-[#FAF0F0] text-[#C92A2A] rounded-md text-[10px] font-extrabold uppercase tracking-wider border border-[#F5D0D0]">
+                Tareas
+              </span>
+              <span className="text-[10px] font-mono text-zinc-400 bg-zinc-100 px-1.5 py-0.5 rounded">
+                v1.1.0
+              </span>
+              <span className="hidden xl:inline text-[11px] text-[#71717A] font-medium pl-1">
+                • {todayFormatted}
+              </span>
             </div>
           </div>
 
@@ -133,33 +156,145 @@ export const Header: React.FC<HeaderProps> = ({
           </nav>
         </div>
 
-        {/* Right: Actions & User info */}
+        {/* Right: Actions & Admin Menus */}
         <div className="flex items-center gap-2 sm:gap-3">
           
-          {/* Areas Manager (Admin only) */}
-          {isAdmin && onOpenAreas && (
+          {/* Informes de Avance (Reports) */}
+          {onOpenReports && (
             <button
               type="button"
-              onClick={onOpenAreas}
-              className="p-2.5 rounded-xl hover:bg-[#FAF7F2] text-[#71717A] hover:text-[#18181B] transition-colors cursor-pointer hidden lg:flex items-center gap-1.5 text-xs font-bold"
-              title="Administrar Áreas"
+              onClick={onOpenReports}
+              className="p-2.5 rounded-xl hover:bg-[#FAF7F2] text-[#71717A] hover:text-[#18181B] transition-colors cursor-pointer hidden sm:flex items-center gap-1.5 text-xs font-bold"
+              title="Ver Informe Ejecutivo y Exportar"
             >
-              <Layers className="w-4 h-4 text-zinc-500" />
-              <span>Áreas</span>
+              <FileSpreadsheet className="w-4 h-4 text-green-700" />
+              <span>Informe</span>
             </button>
           )}
 
-          {/* Team / Invites (Admin only) */}
-          {isAdmin && onOpenTeam && (
-            <button
-              type="button"
-              onClick={onOpenTeam}
-              className="p-2.5 rounded-xl hover:bg-[#FAF7F2] text-[#71717A] hover:text-[#18181B] transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-bold"
-              title="Administrar Integrantes e Invitaciones"
-            >
-              <Users className="w-4 h-4 text-[#C92A2A]" />
-              <span className="hidden sm:inline">Equipo</span>
-            </button>
+          {/* Admin Management Dropdown */}
+          {isAdmin && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowAdminMenu(!showAdminMenu)}
+                className="p-2.5 rounded-xl bg-[#FAF7F2] hover:bg-[#F0EBE1] border border-[#E8E2D9] text-[#18181B] transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-bold shadow-2xs"
+                title="Administración Global"
+              >
+                <span>Gestión</span>
+                <ChevronDown className="w-3.5 h-3.5" />
+              </button>
+
+              {showAdminMenu && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setShowAdminMenu(false)}
+                  />
+                  <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl border border-[#E8E2D9] shadow-xl p-2 z-50 space-y-1 text-xs animate-in zoom-in-95">
+                    
+                    {onOpenReports && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAdminMenu(false)
+                          onOpenReports()
+                        }}
+                        className="w-full p-2 rounded-xl text-left font-semibold text-[#18181B] hover:bg-[#FAF7F2] flex items-center gap-2 cursor-pointer sm:hidden"
+                      >
+                        <FileSpreadsheet className="w-4 h-4 text-green-700" />
+                        <span>Informe y Exportación</span>
+                      </button>
+                    )}
+
+                    {onOpenRecurring && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAdminMenu(false)
+                          onOpenRecurring()
+                        }}
+                        className="w-full p-2 rounded-xl text-left font-semibold text-[#18181B] hover:bg-[#FAF7F2] flex items-center gap-2 cursor-pointer"
+                      >
+                        <Repeat className="w-4 h-4 text-[#C92A2A]" />
+                        <span>Rutinas Recurrentes</span>
+                      </button>
+                    )}
+
+                    {onOpenAreas && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAdminMenu(false)
+                          onOpenAreas()
+                        }}
+                        className="w-full p-2 rounded-xl text-left font-semibold text-[#18181B] hover:bg-[#FAF7F2] flex items-center gap-2 cursor-pointer"
+                      >
+                        <Layers className="w-4 h-4 text-zinc-700" />
+                        <span>Administrar Áreas</span>
+                      </button>
+                    )}
+
+                    {onOpenTeam && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAdminMenu(false)
+                          onOpenTeam()
+                        }}
+                        className="w-full p-2 rounded-xl text-left font-semibold text-[#18181B] hover:bg-[#FAF7F2] flex items-center gap-2 cursor-pointer"
+                      >
+                        <Users className="w-4 h-4 text-[#C92A2A]" />
+                        <span>Equipo e Invitaciones</span>
+                      </button>
+                    )}
+
+                    {onOpenTags && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAdminMenu(false)
+                          onOpenTags()
+                        }}
+                        className="w-full p-2 rounded-xl text-left font-semibold text-[#18181B] hover:bg-[#FAF7F2] flex items-center gap-2 cursor-pointer"
+                      >
+                        <TagIcon className="w-4 h-4 text-amber-600" />
+                        <span>Administrar Etiquetas</span>
+                      </button>
+                    )}
+
+                    {onOpenArchived && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAdminMenu(false)
+                          onOpenArchived()
+                        }}
+                        className="w-full p-2 rounded-xl text-left font-semibold text-[#18181B] hover:bg-[#FAF7F2] flex items-center gap-2 cursor-pointer"
+                      >
+                        <Archive className="w-4 h-4 text-zinc-600" />
+                        <span>Tareas Archivadas</span>
+                      </button>
+                    )}
+
+                    {onOpenSettings && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAdminMenu(false)
+                          onOpenSettings()
+                        }}
+                        className="w-full p-2 rounded-xl text-left font-semibold text-[#18181B] hover:bg-[#FAF7F2] flex items-center gap-2 cursor-pointer border-t border-[#F0EBE1] pt-2"
+                      >
+                        <Settings className="w-4 h-4 text-zinc-500" />
+                        <span>Ajustes Generales</span>
+                      </button>
+                    )}
+
+                  </div>
+                </>
+              )}
+            </div>
           )}
 
           {/* Notifications Bell */}

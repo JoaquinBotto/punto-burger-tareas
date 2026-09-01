@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import type { TaskWithDetails, TaskStatus, TaskPriority, Area, Profile } from '../../types'
 import { taskService } from '../../services/taskService'
+import { attachmentService } from '../../services/attachmentService'
 import { useAuth } from '../../contexts/AuthContext'
 import { formatDueDate, getTimeDifferenceDescription } from '../../lib/dateUtils'
 import { ConfirmationModal } from '../common/ConfirmationModal'
@@ -306,11 +307,55 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
     }
   }
 
-  // File Upload placeholder
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Attachment state
+  const [isUploadingAttachment, setIsUploadingAttachment] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [activeLightboxUrl, setActiveLightboxUrl] = useState<string | null>(null)
+
+  // File Upload
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (!file) return
-    alert(`Archivo seleccionado: ${file.name} (${Math.round(file.size / 1024)} KB). La subida a Storage privado se activará al conectar Supabase Storage.`)
+    if (!file || !canEdit) return
+
+    setActionError(null)
+    setIsUploadingAttachment(true)
+    setUploadProgress(10)
+
+    const res = await attachmentService.uploadTaskAttachment(task.id, file, (p: number) => setUploadProgress(p))
+    setIsUploadingAttachment(false)
+    setUploadProgress(0)
+
+    if (res.success) {
+      onTaskUpdated()
+    } else {
+      setActionError(res.error || 'No se pudo subir el archivo adjunto.')
+    }
+  }
+
+  const handleOpenAttachment = async (storagePath: string, mimeType?: string) => {
+    const res = await attachmentService.getSignedUrl(storagePath, 3600)
+    if (res.url) {
+      if (mimeType?.startsWith('image/')) {
+        setActiveLightboxUrl(res.url)
+      } else {
+        window.open(res.url, '_blank', 'noopener,noreferrer')
+      }
+    } else {
+      setActionError(res.error || 'No se pudo generar el enlace seguro de descarga.')
+    }
+  }
+
+  const handleDeleteAttachment = async (attId: string, storagePath: string) => {
+    if (!canEdit) return
+    setActionError(null)
+    setIsSaving(true)
+    const res = await attachmentService.deleteAttachment(attId, storagePath)
+    setIsSaving(false)
+    if (res.success) {
+      onTaskUpdated()
+    } else {
+      setActionError(res.error || 'No se pudo eliminar el archivo adjunto.')
+    }
   }
 
   return (
@@ -894,19 +939,35 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
                   Adjunta fotografías de avance, comprobantes o planos (Storage Privado).
                 </div>
                 <div className="flex items-center gap-2 w-full sm:w-auto">
-                  <label className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-[#C92A2A] hover:bg-[#B02525] text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all">
+                  <label className={`flex-1 sm:flex-initial px-3.5 py-2.5 bg-[#C92A2A] hover:bg-[#B02525] text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all ${isUploadingAttachment ? 'opacity-50 pointer-events-none' : ''}`}>
                     <Camera className="w-4 h-4" />
-                    <span>Tomar Foto / Subir</span>
+                    <span>{isUploadingAttachment ? `Subiendo (${uploadProgress}%)...` : 'Tomar Foto / Subir'}</span>
                     <input
                       type="file"
-                      accept="image/*,application/pdf"
-                      capture="environment"
+                      accept="image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                       onChange={handleFileUpload}
+                      disabled={isUploadingAttachment || !canEdit}
                       className="hidden"
                     />
                   </label>
                 </div>
               </div>
+
+              {/* Upload Progress Bar */}
+              {isUploadingAttachment && (
+                <div className="p-3 bg-red-50 rounded-xl border border-red-200 space-y-1.5">
+                  <div className="flex justify-between text-xs font-bold text-red-900">
+                    <span>Subiendo y procesando archivo...</span>
+                    <span>{uploadProgress}%</span>
+                  </div>
+                  <div className="w-full h-2 bg-red-200 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-[#C92A2A] rounded-full transition-all duration-200"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
 
               {(!task.attachments || task.attachments.length === 0) ? (
                 <div className="p-8 text-center text-xs text-[#71717A]">
@@ -914,12 +975,52 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {task.attachments.map(att => (
-                    <div key={att.id} className="p-3 rounded-2xl bg-[#FAF7F2] border border-[#E8E2D9] flex items-center justify-between text-xs">
-                      <span className="font-semibold text-[#18181B] truncate">{att.file_name}</span>
-                      <span className="text-[#71717A] text-[11px]">{Math.round(att.file_size / 1024)} KB</span>
-                    </div>
-                  ))}
+                  {task.attachments.map(att => {
+                    const isImg = att.file_type?.startsWith('image/')
+                    return (
+                      <div
+                        key={att.id}
+                        className="p-3.5 rounded-2xl bg-[#FAF7F2] border border-[#E8E2D9] flex items-center justify-between gap-3 text-xs"
+                      >
+                        <div
+                          onClick={() => handleOpenAttachment(att.storage_path, att.file_type)}
+                          className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer group"
+                        >
+                          <div className="w-9 h-9 rounded-xl bg-white border border-[#E8E2D9] flex items-center justify-center flex-shrink-0 text-[#C92A2A] group-hover:scale-105 transition-transform">
+                            {isImg ? <Camera className="w-4 h-4" /> : <Paperclip className="w-4 h-4" />}
+                          </div>
+                          <div className="min-w-0">
+                            <span className="font-bold text-[#18181B] group-hover:text-[#C92A2A] transition-colors block truncate">
+                              {att.file_name}
+                            </span>
+                            <span className="text-[#71717A] text-[11px] block">
+                              {Math.round(att.file_size / 1024)} KB • {new Date(att.created_at).toLocaleDateString([], { day: '2-digit', month: 'short' })}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenAttachment(att.storage_path, att.file_type)}
+                            className="px-2.5 py-1.5 rounded-xl bg-white border border-[#E8E2D9] hover:bg-zinc-100 text-xs font-bold text-zinc-700 transition-colors cursor-pointer"
+                          >
+                            Abrir
+                          </button>
+                          {canEdit && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteAttachment(att.id, att.storage_path)}
+                              className="p-1.5 rounded-xl text-zinc-400 hover:text-red-600 transition-colors cursor-pointer"
+                              title="Eliminar adjunto"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             </div>
@@ -1154,6 +1255,30 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
           onConfirm={(extra) => executeStatusChange(stateModalTarget, extra)}
           onCancel={() => setStateModalTarget(null)}
         />
+      )}
+
+      {/* Lightbox Modal for Image Preview */}
+      {activeLightboxUrl && (
+        <div
+          onClick={() => setActiveLightboxUrl(null)}
+          className="fixed inset-0 z-60 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 cursor-zoom-out animate-in fade-in"
+        >
+          <div className="relative max-w-4xl max-h-[90vh] flex flex-col items-center">
+            <img
+              src={activeLightboxUrl}
+              alt="Evidencia adjunta"
+              className="max-w-full max-h-[85vh] object-contain rounded-2xl shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <button
+              type="button"
+              onClick={() => setActiveLightboxUrl(null)}
+              className="mt-3 px-4 py-2 bg-white/20 hover:bg-white/30 text-white text-xs font-bold rounded-xl transition-all cursor-pointer"
+            >
+              Cerrar Vista Previa
+            </button>
+          </div>
+        </div>
       )}
 
     </div>
