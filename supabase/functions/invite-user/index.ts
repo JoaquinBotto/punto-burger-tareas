@@ -1,14 +1,24 @@
-// Follow this setup guide to integrate the Deno language server with your editor:
-// https://deno.land/manual/getting_started/setup_your_environment
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+const ALLOWED_ORIGINS = [
+  'http://localhost:5173',
+  'https://punto-burger-tareas.joaquinhbotto.workers.dev'
+]
+
+function getCorsHeaders(req: Request) {
+  const origin = req.headers.get('Origin') || ''
+  const isAllowed = ALLOWED_ORIGINS.includes(origin)
+  return {
+    'Access-Control-Allow-Origin': isAllowed ? origin : ALLOWED_ORIGINS[1],
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  }
 }
 
 serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req)
+
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
@@ -72,8 +82,10 @@ serve(async (req) => {
     }
 
     // 4. Invitar usuario mediante Supabase Auth Admin
+    const origin = req.headers.get('Origin') || 'https://punto-burger-tareas.joaquinhbotto.workers.dev'
     const { data: inviteData, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-      data: { full_name, role }
+      data: { full_name, role },
+      redirectTo: `${origin}/#type=invite`
     })
 
     if (inviteError) {
@@ -90,7 +102,7 @@ serve(async (req) => {
       .from('profiles')
       .upsert({
         id: invitedUserId,
-        email,
+        email: email.toLowerCase(),
         full_name,
         phone: phone || null,
         role,

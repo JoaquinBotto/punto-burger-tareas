@@ -201,8 +201,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     try {
+      const appOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://punto-burger-tareas.joaquinhbotto.workers.dev'
       const { error: resetErr } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`,
+        redirectTo: `${appOrigin}/#type=recovery`,
       })
 
       if (resetErr) {
