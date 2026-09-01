@@ -55,6 +55,9 @@ export const Header: React.FC<HeaderProps> = ({ unreadAlertsCount = 0, onOpenAle
               <span className="hidden sm:inline-block px-2 py-0.5 bg-[#FAF0F0] text-[#C92A2A] rounded-md text-[10px] font-extrabold uppercase tracking-wider">
                 Tareas
               </span>
+              <span className="text-[10px] font-mono text-zinc-400 bg-zinc-100 px-1.5 py-0.5 rounded">
+                v1.0.3
+              </span>
             </div>
             <p className="text-xs text-[#71717A] font-medium hidden sm:block">
               {todayFormatted} • Córdoba, ARG

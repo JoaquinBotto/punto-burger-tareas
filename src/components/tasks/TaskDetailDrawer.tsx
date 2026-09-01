@@ -1,5 +1,5 @@
-import React, { useState } from 'react'
-import type { TaskWithDetails, TaskStatus, Area, Profile } from '../../types'
+import React, { useState, useEffect } from 'react'
+import type { TaskWithDetails, TaskStatus, TaskPriority, Area, Profile } from '../../types'
 import { taskService } from '../../services/taskService'
 import { useAuth } from '../../contexts/AuthContext'
 import { formatDueDate, getTimeDifferenceDescription } from '../../lib/dateUtils'
@@ -21,7 +21,11 @@ import {
   Square,
   Send,
   Camera,
-  Link
+  Link,
+  Edit3,
+  Check,
+  Calendar,
+  AlertCircle
 } from 'lucide-react'
 
 interface TaskDetailDrawerProps {
@@ -37,6 +41,8 @@ interface TaskDetailDrawerProps {
 export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
   task,
   allTasks,
+  areas = [],
+  profiles = [],
   isOpen,
   onClose,
   onTaskUpdated
@@ -45,6 +51,16 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
   
   const [activeTab, setActiveTab] = useState<'checklist' | 'comments' | 'attachments' | 'dependencies'>('checklist')
   
+  // Edit mode state
+  const [isEditingDetails, setIsEditingDetails] = useState(false)
+  const [editTitle, setEditTitle] = useState('')
+  const [editDescription, setEditDescription] = useState('')
+  const [editAreaId, setEditAreaId] = useState('')
+  const [editPriority, setEditPriority] = useState<TaskPriority>('alta')
+  const [editDueDate, setEditDueDate] = useState('')
+  const [editDueTime, setEditDueTime] = useState('')
+  const [editMainAssigneeId, setEditMainAssigneeId] = useState('')
+
   // Modals state
   const [showConfirmCritical, setShowConfirmCritical] = useState(false)
   const [showConfirmArchive, setShowConfirmArchive] = useState(false)
@@ -59,6 +75,21 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
   const [isSaving, setIsSaving] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
 
+  useEffect(() => {
+    if (task) {
+      setEditTitle(task.title || '')
+      setEditDescription(task.description || '')
+      setEditAreaId(task.area_id || '')
+      setEditPriority(task.priority || 'alta')
+      setEditDueDate(task.due_date || '')
+      setEditDueTime(task.due_time || '')
+      setEditMainAssigneeId(task.main_assignee_id || '')
+      setManualProgress(task.progress_percentage || 0)
+      setIsEditingDetails(false)
+      setActionError(null)
+    }
+  }, [task?.id, task?.version, task?.updated_at])
+
   if (!isOpen || !task) return null
 
   const isAssigned = task.main_assignee_id === user?.id || task.assignees?.some(a => a.id === user?.id)
@@ -66,11 +97,46 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
   const totalSubtasks = task.subtasks?.length || 0
   const isCompleted = task.status === 'completada'
 
+  // Save Task Details (Title, Description, Area, Priority, Dates, Assignee)
+  const handleSaveDetails = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editTitle.trim()) {
+      setActionError('El título no puede estar vacío.')
+      return
+    }
+    if (!editAreaId) {
+      setActionError('Debes seleccionar un área válida.')
+      return
+    }
+
+    setActionError(null)
+    setIsSaving(true)
+
+    const res = await taskService.updateTaskDetails(task.id, {
+      title: editTitle.trim(),
+      description: editDescription.trim() || null,
+      area_id: editAreaId,
+      priority: editPriority,
+      due_date: editDueDate || null,
+      due_time: editDueTime || null,
+      main_assignee_id: editMainAssigneeId || null
+    })
+
+    setIsSaving(false)
+
+    if (res.success) {
+      setIsEditingDetails(false)
+      onTaskUpdated()
+    } else {
+      setActionError(res.error || 'No se pudo guardar la información de la tarea.')
+    }
+  }
+
   // Subtask Toggle
-  const handleToggleSubtask = async (subtaskId: string, isCompleted: boolean) => {
+  const handleToggleSubtask = async (subtaskId: string, isCompletedVal: boolean) => {
     if (!canEdit) return
     setActionError(null)
-    const res = await taskService.toggleSubtask(task.id, subtaskId, isCompleted)
+    const res = await taskService.toggleSubtask(task.id, subtaskId, isCompletedVal)
     if (res.success) {
       onTaskUpdated()
     } else {
@@ -109,7 +175,7 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
     if (!canEdit || totalSubtasks > 0) return
     setActionError(null)
     setManualProgress(val)
-    const res = await taskService.updateTask(task.id, { progress_percentage: val, is_progress_manual: true })
+    const res = await taskService.updateTaskProgress(task.id, val)
     if (res.success) {
       onTaskUpdated()
     } else {
@@ -183,30 +249,45 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
   const handleAddComment = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newComment.trim()) return
-    await taskService.addComment(task.id, user?.id || 'u1', newComment.trim())
-    setNewComment('')
-    onTaskUpdated()
+    setActionError(null)
+    const res = await taskService.addComment(task.id, user?.id || '', newComment.trim())
+    if (res.success) {
+      setNewComment('')
+      onTaskUpdated()
+    } else {
+      setActionError(res.error || 'No se pudo publicar el comentario.')
+    }
   }
 
   // Add Dependency
   const handleAddDependency = async () => {
     if (!selectedBlockingTaskId || !canEdit) return
-    await taskService.addDependency(task.id, selectedBlockingTaskId)
-    setSelectedBlockingTaskId('')
-    onTaskUpdated()
+    setActionError(null)
+    const res = await taskService.addDependency(task.id, selectedBlockingTaskId)
+    if (res.success) {
+      setSelectedBlockingTaskId('')
+      onTaskUpdated()
+    } else {
+      setActionError(res.error || 'No se pudo vincular la dependencia.')
+    }
   }
 
   const handleRemoveDependency = async (depId: string) => {
     if (!canEdit) return
-    await taskService.removeDependency(depId)
-    onTaskUpdated()
+    setActionError(null)
+    const res = await taskService.removeDependency(depId)
+    if (res.success) {
+      onTaskUpdated()
+    } else {
+      setActionError(res.error || 'No se pudo eliminar la dependencia.')
+    }
   }
 
-  // File Upload
+  // File Upload placeholder
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    alert(`Archivo seleccionado: ${file.name} (${Math.round(file.size / 1024)} KB). La subida a Storage privado se activará al conectar Supabase.`)
+    alert(`Archivo seleccionado: ${file.name} (${Math.round(file.size / 1024)} KB). La subida a Storage privado se activará al conectar Supabase Storage.`)
   }
 
   return (
@@ -215,7 +296,7 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
         
         {/* Header */}
         <div className="p-5 sm:p-6 border-b border-[#F0EBE1] flex items-start justify-between gap-4 bg-[#FAF7F2]">
-          <div className="space-y-2">
+          <div className="space-y-2 flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               {task.area && (
                 <span
@@ -235,24 +316,163 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
               )}
             </div>
 
-            <h2 className="text-xl sm:text-2xl font-black text-[#18181B] leading-tight">
-              {task.title}
-            </h2>
+            {!isEditingDetails ? (
+              <>
+                <div className="flex items-start justify-between gap-3">
+                  <h2 className="text-xl sm:text-2xl font-black text-[#18181B] leading-tight">
+                    {task.title}
+                  </h2>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingDetails(true)}
+                      className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-zinc-100 text-[#18181B] text-xs font-bold border border-[#E8E2D9] transition-all flex items-center gap-1.5 flex-shrink-0 cursor-pointer"
+                      title="Editar información"
+                    >
+                      <Edit3 className="w-3.5 h-3.5 text-[#C92A2A]" />
+                      <span>Editar</span>
+                    </button>
+                  )}
+                </div>
 
-            <p className="text-xs text-[#71717A] flex items-center gap-2">
-              <span>{formatDueDate(task.due_date, task.due_time)}</span>
-              {task.due_date && (
-                <>
-                  <span>•</span>
-                  <span className="font-semibold text-[#18181B]">
-                    {getTimeDifferenceDescription(task.due_date, task.due_time)}
-                  </span>
-                </>
-              )}
-            </p>
+                {task.description && (
+                  <p className="text-xs text-[#52525B] leading-relaxed whitespace-pre-line bg-white/70 p-3 rounded-xl border border-[#E8E2D9]">
+                    {task.description}
+                  </p>
+                )}
+
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[#71717A]">
+                  <p className="flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-zinc-400" />
+                    <span>{formatDueDate(task.due_date, task.due_time)}</span>
+                    {task.due_date && (
+                      <span className="font-semibold text-[#18181B]">
+                        ({getTimeDifferenceDescription(task.due_date, task.due_time)})
+                      </span>
+                    )}
+                  </p>
+
+                  {task.main_assignee && (
+                    <p className="flex items-center gap-1.5">
+                      <Users className="w-3.5 h-3.5 text-zinc-400" />
+                      <span className="font-semibold text-[#18181B]">{task.main_assignee.full_name}</span>
+                    </p>
+                  )}
+                </div>
+              </>
+            ) : (
+              <form onSubmit={handleSaveDetails} className="space-y-3 bg-white p-4 rounded-2xl border border-[#E8E2D9] shadow-xs">
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-[#71717A] mb-1">
+                    Título de la Tarea
+                  </label>
+                  <input
+                    type="text"
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    required
+                    className="w-full p-2.5 bg-[#FAF7F2] border border-[#E8E2D9] rounded-xl text-xs font-bold text-[#18181B] focus:outline-none focus:ring-2 focus:ring-[#C92A2A] focus:bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-[#71717A] mb-1">
+                    Descripción / Detalle
+                  </label>
+                  <textarea
+                    value={editDescription}
+                    onChange={(e) => setEditDescription(e.target.value)}
+                    rows={3}
+                    placeholder="Detalles específicos para la apertura..."
+                    className="w-full p-2.5 bg-[#FAF7F2] border border-[#E8E2D9] rounded-xl text-xs text-[#18181B] focus:outline-none focus:ring-2 focus:ring-[#C92A2A] focus:bg-white resize-none"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-[#71717A] mb-1">
+                      Área
+                    </label>
+                    <select
+                      value={editAreaId}
+                      onChange={(e) => setEditAreaId(e.target.value)}
+                      className="w-full p-2 bg-[#FAF7F2] border border-[#E8E2D9] rounded-xl text-xs font-semibold text-[#18181B]"
+                    >
+                      {areas.map(a => (
+                        <option key={a.id} value={a.id}>{a.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-[#71717A] mb-1">
+                      Prioridad
+                    </label>
+                    <select
+                      value={editPriority}
+                      onChange={(e) => setEditPriority(e.target.value as TaskPriority)}
+                      className="w-full p-2 bg-[#FAF7F2] border border-[#E8E2D9] rounded-xl text-xs font-semibold text-[#18181B]"
+                    >
+                      <option value="critica">Crítica (Bloqueante)</option>
+                      <option value="alta">Alta</option>
+                      <option value="media">Media</option>
+                      <option value="baja">Baja</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-[#71717A] mb-1">
+                      Fecha Vencimiento
+                    </label>
+                    <input
+                      type="date"
+                      value={editDueDate}
+                      onChange={(e) => setEditDueDate(e.target.value)}
+                      className="w-full p-2 bg-[#FAF7F2] border border-[#E8E2D9] rounded-xl text-xs text-[#18181B]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-[#71717A] mb-1">
+                      Responsable Principal
+                    </label>
+                    <select
+                      value={editMainAssigneeId}
+                      onChange={(e) => setEditMainAssigneeId(e.target.value)}
+                      className="w-full p-2 bg-[#FAF7F2] border border-[#E8E2D9] rounded-xl text-xs text-[#18181B]"
+                    >
+                      <option value="">Sin asignar</option>
+                      {profiles.map(p => (
+                        <option key={p.id} value={p.id}>{p.full_name} ({p.role})</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E8E2D9]">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingDetails(false)}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold text-zinc-600 hover:bg-zinc-100 transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSaving}
+                    className="px-4 py-1.5 rounded-xl bg-[#C92A2A] hover:bg-[#B02525] text-white text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>{isSaving ? 'Guardando...' : 'Guardar Cambios'}</span>
+                  </button>
+                </div>
+              </form>
+            )}
+
           </div>
 
           <button
+            type="button"
             onClick={onClose}
             className="p-2 rounded-xl text-[#A1A1AA] hover:text-[#18181B] hover:bg-white transition-colors cursor-pointer"
           >
@@ -263,10 +483,14 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
         {/* Action Error Banner if any */}
         {actionError && (
           <div className="px-6 py-3 bg-red-50 border-b border-red-200 text-xs text-red-700 flex items-center justify-between gap-2 animate-in fade-in">
-            <span className="font-semibold">{actionError}</span>
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+              <span className="font-semibold">{actionError}</span>
+            </div>
             <button
+              type="button"
               onClick={() => setActionError(null)}
-              className="text-xs text-red-600 hover:text-red-900 font-bold"
+              className="text-xs text-red-600 hover:text-red-900 font-bold cursor-pointer"
             >
               Cerrar
             </button>
@@ -277,6 +501,7 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
         <div className="p-3 sm:px-6 bg-white border-b border-[#F0EBE1] flex items-center gap-2 overflow-x-auto">
           {task.status !== 'en_progreso' && !isCompleted && (
             <button
+              type="button"
               onClick={() => executeStatusChange('en_progreso')}
               className="px-3.5 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer flex-shrink-0"
             >
@@ -287,6 +512,7 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
 
           {!isCompleted ? (
             <button
+              type="button"
               onClick={handleCompleteClick}
               className="px-3.5 py-2 rounded-xl bg-green-600 hover:bg-green-700 text-white text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer flex-shrink-0"
             >
@@ -295,6 +521,7 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
             </button>
           ) : (
             <button
+              type="button"
               onClick={() => executeStatusChange('en_progreso')}
               className="px-3.5 py-2 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-800 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer flex-shrink-0"
             >
@@ -305,6 +532,7 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
 
           {task.status !== 'bloqueada' && !isCompleted && (
             <button
+              type="button"
               onClick={() => setStateModalTarget('bloqueada')}
               className="px-3.5 py-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer flex-shrink-0"
             >
@@ -315,6 +543,7 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
 
           {task.status !== 'esperando_tercero' && !isCompleted && (
             <button
+              type="button"
               onClick={() => setStateModalTarget('esperando_tercero')}
               className="px-3.5 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer flex-shrink-0"
             >
@@ -326,6 +555,7 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
           {isAdmin && (
             !task.archived_at ? (
               <button
+                type="button"
                 onClick={() => setShowConfirmArchive(true)}
                 className="px-3 py-2 rounded-xl text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer flex-shrink-0 ml-auto"
                 title="Archivar tarea"
@@ -335,6 +565,7 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
               </button>
             ) : (
               <button
+                type="button"
                 onClick={() => setShowConfirmRestore(true)}
                 className="px-3 py-2 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-900 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer flex-shrink-0 ml-auto"
               >
@@ -370,6 +601,7 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
         {/* Tab Navigation */}
         <div className="px-6 pt-3 flex items-center gap-4 border-b border-[#F0EBE1] text-xs font-bold">
           <button
+            type="button"
             onClick={() => setActiveTab('checklist')}
             className={`pb-3 border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'checklist' ? 'border-[#C92A2A] text-[#C92A2A]' : 'border-transparent text-[#71717A] hover:text-[#18181B]'
@@ -380,6 +612,7 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
           </button>
 
           <button
+            type="button"
             onClick={() => setActiveTab('comments')}
             className={`pb-3 border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'comments' ? 'border-[#C92A2A] text-[#C92A2A]' : 'border-transparent text-[#71717A] hover:text-[#18181B]'
@@ -390,6 +623,7 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
           </button>
 
           <button
+            type="button"
             onClick={() => setActiveTab('attachments')}
             className={`pb-3 border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'attachments' ? 'border-[#C92A2A] text-[#C92A2A]' : 'border-transparent text-[#71717A] hover:text-[#18181B]'
@@ -400,6 +634,7 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
           </button>
 
           <button
+            type="button"
             onClick={() => setActiveTab('dependencies')}
             className={`pb-3 border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'dependencies' ? 'border-[#C92A2A] text-[#C92A2A]' : 'border-transparent text-[#71717A] hover:text-[#18181B]'
@@ -531,21 +766,17 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
             <div className="space-y-4">
               <div className="space-y-3">
                 {(!task.comments || task.comments.length === 0) ? (
-                  <div className="p-8 rounded-2xl bg-zinc-50 border border-zinc-200 text-center text-xs text-[#71717A]">
-                    Aún no hay comentarios en esta tarea. Deja una nota para el equipo.
+                  <div className="p-8 text-center text-xs text-[#71717A]">
+                    No hay comentarios en esta tarea. Agrega una nota o novedad para el equipo.
                   </div>
                 ) : (
                   task.comments.map(c => (
                     <div key={c.id} className="p-4 rounded-2xl bg-[#FAF7F2] border border-[#E8E2D9] space-y-1">
-                      <div className="flex justify-between items-center text-xs">
-                        <span className="font-bold text-[#18181B]">
-                          {c.profile?.full_name || 'Integrante'}
-                        </span>
-                        <span className="text-[#A1A1AA] text-[11px]">
-                          {new Date(c.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-bold text-[#18181B]">{c.profile?.full_name || 'Usuario'}</span>
+                        <span className="text-[#A1A1AA] text-[11px]">{new Date(c.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
-                      <p className="text-sm text-[#18181B] leading-relaxed">{c.content}</p>
+                      <p className="text-xs text-[#3F3F46] leading-relaxed">{c.content}</p>
                     </div>
                   ))
                 )}
@@ -631,6 +862,7 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
                         </div>
                         {canEdit && (
                           <button
+                            type="button"
                             onClick={() => handleRemoveDependency(dep.id)}
                             className="text-red-500 hover:text-red-700 p-1 cursor-pointer"
                           >
