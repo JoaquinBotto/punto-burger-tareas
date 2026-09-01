@@ -13,7 +13,7 @@ export default defineConfig({
       devOptions: {
         enabled: false // Service worker disabled in development
       },
-      includeAssets: ['favicon.svg', '_headers', '_redirects'],
+      includeAssets: ['favicon.svg', '_headers'],
       manifest: {
         name: 'Punto Burger | Tareas',
         short_name: 'Punto Tareas',
