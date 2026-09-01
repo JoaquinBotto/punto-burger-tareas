@@ -1,37 +1,58 @@
 import React, { useState, useEffect } from 'react'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
-import { Header } from './components/common/Header'
+import { Header, type MainNavTab } from './components/common/Header'
+import { BottomNav, type NavTab } from './components/common/BottomNav'
 import { OfflineBanner } from './components/common/OfflineBanner'
 import { LoginModal } from './components/auth/LoginModal'
 import { ForgotPasswordModal } from './components/auth/ForgotPasswordModal'
 import { UpdatePasswordModal } from './components/auth/UpdatePasswordModal'
 import { SetupAdminNotice } from './components/auth/SetupAdminNotice'
+import { DashboardView } from './components/dashboard/DashboardView'
+import { MyDayView } from './components/myday/MyDayView'
 import { TaskList } from './components/tasks/TaskList'
 import { QuickTaskModal } from './components/tasks/QuickTaskModal'
 import { TaskDetailDrawer } from './components/tasks/TaskDetailDrawer'
+import { NotificationsDrawer } from './components/notifications/NotificationsDrawer'
 import { AreaManagerModal } from './components/areas/AreaManagerModal'
 import { TeamManagerModal } from './components/team/TeamManagerModal'
 import { taskService } from './services/taskService'
 import { areaService } from './services/areaService'
 import { profileService } from './services/profileService'
-import type { TaskWithDetails, Area, Profile } from './types'
+import { notificationService } from './services/notificationService'
+import { activityService, type ActivityItem } from './services/activityService'
+import type { TaskWithDetails, Area, Profile, Notification } from './types'
 import { isSupabaseConfigured } from './lib/supabase'
-import { Loader2, AlertTriangle, Flame, Database } from 'lucide-react'
+import { Loader2, AlertTriangle, Flame, Database, Plus } from 'lucide-react'
 
 const MainApp: React.FC = () => {
   const { session, user, profile, isAdmin, loading: authLoading } = useAuth()
   const [authView, setAuthView] = useState<'login' | 'forgot_password'>('login')
   const [showUpdatePassword, setShowUpdatePassword] = useState(false)
 
+  // Navigation tab
+  const [currentTab, setCurrentTab] = useState<MainNavTab>('dashboard')
+
+  // Task Filter from Dashboard navigation
+  const [activeTaskFilters, setActiveTaskFilters] = useState<{
+    areaId?: string
+    status?: string
+    priority?: string
+    isBlockedOnly?: boolean
+  }>({})
+
   // Data states
   const [tasks, setTasks] = useState<TaskWithDetails[]>([])
   const [areas, setAreas] = useState<Area[]>([])
   const [profiles, setProfiles] = useState<Profile[]>([])
+  const [activity, setActivity] = useState<ActivityItem[]>([])
+  const [notifications, setNotifications] = useState<Notification[]>([])
+  const [unreadCount, setUnreadCount] = useState<number>(0)
   const [isLoadingData, setIsLoadingData] = useState(true)
 
   // Modal / Drawer states
   const [selectedTask, setSelectedTask] = useState<TaskWithDetails | null>(null)
   const [showQuickTaskModal, setShowQuickTaskModal] = useState(false)
+  const [showNotificationsDrawer, setShowNotificationsDrawer] = useState(false)
   const [showAreaManager, setShowAreaManager] = useState(false)
   const [showTeamManager, setShowTeamManager] = useState(false)
 
@@ -39,14 +60,20 @@ const MainApp: React.FC = () => {
   const loadData = async () => {
     setIsLoadingData(true)
     try {
-      const [loadedAreas, loadedProfiles, loadedTasks] = await Promise.all([
+      const [loadedAreas, loadedProfiles, loadedTasks, loadedActivity, loadedNotifications, unread] = await Promise.all([
         areaService.getAreas(isAdmin),
         profileService.getProfiles(true),
-        taskService.getTasks()
+        taskService.getTasks(),
+        activityService.getRecentActivity(20),
+        notificationService.getNotifications(30),
+        notificationService.getUnreadCount()
       ])
       setAreas(loadedAreas)
       setProfiles(loadedProfiles)
       setTasks(loadedTasks)
+      setActivity(loadedActivity)
+      setNotifications(loadedNotifications)
+      setUnreadCount(unread)
 
       // Refresh selected task if open
       if (selectedTask) {
@@ -58,6 +85,15 @@ const MainApp: React.FC = () => {
     } finally {
       setIsLoadingData(false)
     }
+  }
+
+  const refreshNotifications = async () => {
+    const [loadedNotifications, unread] = await Promise.all([
+      notificationService.getNotifications(30),
+      notificationService.getUnreadCount()
+    ])
+    setNotifications(loadedNotifications)
+    setUnreadCount(unread)
   }
 
   useEffect(() => {
@@ -124,12 +160,46 @@ const MainApp: React.FC = () => {
     )
   }
 
+  // Handle BottomNav clicks
+  const handleBottomNavChange = (tab: NavTab) => {
+    if (tab === 'alerts') {
+      setShowNotificationsDrawer(true)
+    } else if (tab === 'more') {
+      if (isAdmin) {
+        setShowTeamManager(true)
+      } else {
+        setShowNotificationsDrawer(true)
+      }
+    } else {
+      setCurrentTab(tab as MainNavTab)
+    }
+  }
+
+  const navigateToTasksWithFilter = (filter: {
+    status?: string
+    isBlockedOnly?: boolean
+    areaId?: string
+    priority?: string
+  }) => {
+    setActiveTaskFilters(filter)
+    setCurrentTab('tasks')
+  }
+
   return (
     <div className="min-h-screen bg-[#FAF7F2] flex flex-col text-[#18181B]">
       <OfflineBanner />
+      
+      {/* Header */}
       <Header
+        currentTab={currentTab}
+        onTabChange={(tab) => {
+          setActiveTaskFilters({})
+          setCurrentTab(tab)
+        }}
+        unreadAlertsCount={unreadCount}
+        onOpenAlerts={() => setShowNotificationsDrawer(true)}
         onOpenTeam={() => setShowTeamManager(true)}
-        onOpenAlerts={() => alert('El Centro de Notificaciones y Alertas Internas se expande en la Etapa 3.')}
+        onOpenAreas={() => setShowAreaManager(true)}
       />
 
       {showUpdatePassword && (
@@ -144,7 +214,7 @@ const MainApp: React.FC = () => {
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-6 sm:px-6 space-y-6">
         
-        {/* Connection Notice / Demo Banner if Supabase not yet connected */}
+        {/* Connection Notice if demo */}
         {!isSupabaseConfigured && (
           <div className="p-4 rounded-3xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
             <div className="flex items-center gap-2.5">
@@ -159,18 +229,37 @@ const MainApp: React.FC = () => {
           </div>
         )}
 
-        {/* Task List Component */}
+        {/* Dynamic View rendering */}
         {isLoadingData ? (
           <div className="p-12 text-center text-[#71717A] flex items-center justify-center gap-2">
             <Loader2 className="w-5 h-5 animate-spin text-[#C92A2A]" />
-            <span className="text-sm font-semibold">Cargando tareas operativas...</span>
+            <span className="text-sm font-semibold">Cargando tablero operativo...</span>
           </div>
+        ) : currentTab === 'dashboard' ? (
+          <DashboardView
+            tasks={tasks}
+            areas={areas}
+            profiles={profiles}
+            activity={activity}
+            userName={profile?.full_name || 'Equipo'}
+            onSelectTask={(t) => setSelectedTask(t)}
+            onNavigateToTasksWithFilter={navigateToTasksWithFilter}
+          />
+        ) : currentTab === 'my_day' ? (
+          <MyDayView
+            tasks={tasks}
+            onSelectTask={(t) => setSelectedTask(t)}
+          />
         ) : (
           <TaskList
             tasks={tasks}
             areas={areas}
             profiles={profiles}
             isAdmin={isAdmin}
+            initialAreaId={activeTaskFilters.areaId || 'all'}
+            initialStatus={activeTaskFilters.status || 'all'}
+            initialPriority={activeTaskFilters.priority || 'all'}
+            initialIsBlockedOnly={Boolean(activeTaskFilters.isBlockedOnly)}
             onTaskClick={(task) => setSelectedTask(task)}
             onNewTaskClick={() => setShowQuickTaskModal(true)}
             onOpenAreaManager={() => setShowAreaManager(true)}
@@ -178,6 +267,26 @@ const MainApp: React.FC = () => {
         )}
 
       </main>
+
+      {/* Floating Action Button for Mobile Quick Task */}
+      <div className="md:hidden fixed bottom-20 right-4 z-30">
+        <button
+          type="button"
+          onClick={() => setShowQuickTaskModal(true)}
+          className="w-13 h-13 rounded-full bg-[#C92A2A] text-white shadow-xl shadow-[#C92A2A]/40 flex items-center justify-center cursor-pointer active:scale-95 transition-all"
+          title="Crear tarea rápida"
+          aria-label="Crear tarea rápida"
+        >
+          <Plus className="w-6 h-6" />
+        </button>
+      </div>
+
+      {/* Bottom Mobile Navigation Bar */}
+      <BottomNav
+        currentTab={currentTab}
+        onTabChange={handleBottomNavChange}
+        unreadCount={unreadCount}
+      />
 
       {/* Quick Task Modal */}
       <QuickTaskModal
@@ -200,6 +309,16 @@ const MainApp: React.FC = () => {
         isOpen={Boolean(selectedTask)}
         onClose={() => setSelectedTask(null)}
         onTaskUpdated={loadData}
+      />
+
+      {/* Notifications Drawer */}
+      <NotificationsDrawer
+        isOpen={showNotificationsDrawer}
+        notifications={notifications}
+        tasks={tasks}
+        onClose={() => setShowNotificationsDrawer(false)}
+        onRefreshNotifications={refreshNotifications}
+        onSelectTask={(t) => setSelectedTask(t)}
       />
 
       {/* Area Manager Modal */}
