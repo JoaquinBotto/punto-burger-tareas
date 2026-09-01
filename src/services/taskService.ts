@@ -4,39 +4,16 @@ import { DEMO_TASKS, INITIAL_AREAS, DEMO_PROFILES } from '../data/demoData'
 
 let localTasksMemory: TaskWithDetails[] = JSON.parse(JSON.stringify(DEMO_TASKS))
 
-// Valid columns in the Postgres 'tasks' table
-const VALID_TASK_COLUMNS = new Set([
+// Columns allowed for general task details update
+const TASK_DETAIL_COLUMNS = new Set([
   'title',
   'description',
   'area_id',
   'main_assignee_id',
   'priority',
-  'status',
-  'progress_percentage',
-  'is_progress_manual',
   'due_date',
-  'due_time',
-  'third_party_name',
-  'third_party_reason',
-  'third_party_promised_date',
-  'third_party_contact',
-  'blocked_reason',
-  'blocked_at',
-  'completed_by',
-  'completed_at',
-  'archived_at',
-  'archived_by',
-  'is_recurring',
-  'recurring_rule_id',
-  'recurrence_occurrence_date',
-  'is_demo',
-  'version'
+  'due_time'
 ])
-
-function sanitizeColumnValue(val: any): any {
-  if (val === '' || val === undefined) return null
-  return val
-}
 
 export const taskService = {
   async getTasks(filters?: Partial<TaskFilters>): Promise<TaskWithDetails[]> {
@@ -88,7 +65,7 @@ export const taskService = {
           subtasks(*),
           comments(*, profile:profiles(*)),
           attachments(*),
-          task_dependencies!task_dependencies_task_id_fkey(*, blocking_task:tasks(*)),
+          task_dependencies!task_dependencies_task_id_fkey(*, blocking_task:tasks!task_dependencies_blocking_task_id_fkey(*)),
           task_assignees(profile:profiles(*))
         `)
         .order('created_at', { ascending: false })
@@ -127,7 +104,7 @@ export const taskService = {
 
       const { data, error } = await query
       if (error) {
-        console.error('[taskService.getTasks] Error fetching tasks:', error)
+        console.error('[taskService.getTasks] Error fetching tasks from Supabase:', error)
         return []
       }
 
@@ -229,22 +206,22 @@ export const taskService = {
         return { success: false, error: 'Sesión no válida o expirada. Por favor, vuelve a iniciar sesión.' }
       }
 
-      // 1. Prepare sanitized insert object
+      // 1. Prepare sanitized insert object (convert empty strings to null on CREATE)
       const insertPayload: Record<string, any> = {
         title: payload.title.trim(),
-        description: sanitizeColumnValue(payload.description),
+        description: payload.description?.trim() || null,
         area_id: payload.area_id,
-        main_assignee_id: sanitizeColumnValue(payload.main_assignee_id),
+        main_assignee_id: payload.main_assignee_id || null,
         priority: payload.priority || 'alta',
         status: 'pendiente',
         progress_percentage: 0,
         is_progress_manual: (payload.subtasks?.length || 0) === 0,
-        due_date: sanitizeColumnValue(payload.due_date),
-        due_time: sanitizeColumnValue(payload.due_time),
-        third_party_name: sanitizeColumnValue(payload.third_party_name),
-        third_party_reason: sanitizeColumnValue(payload.third_party_reason),
-        third_party_promised_date: sanitizeColumnValue(payload.third_party_promised_date),
-        third_party_contact: sanitizeColumnValue(payload.third_party_contact),
+        due_date: payload.due_date || null,
+        due_time: payload.due_time || null,
+        third_party_name: payload.third_party_name || null,
+        third_party_reason: payload.third_party_reason || null,
+        third_party_promised_date: payload.third_party_promised_date || null,
+        third_party_contact: payload.third_party_contact || null,
         created_by: currentUserId
       }
 
@@ -306,13 +283,25 @@ export const taskService = {
     }
   },
 
-  async updateTask(id: string, updates: Partial<TaskWithDetails>, currentVersion?: number): Promise<{ success: boolean; error?: string }> {
+  async updateTaskDetails(
+    id: string,
+    details: {
+      title?: string
+      description?: string | null
+      area_id?: string
+      priority?: TaskPriority
+      due_date?: string | null
+      due_time?: string | null
+      main_assignee_id?: string | null
+    },
+    currentVersion?: number
+  ): Promise<{ success: boolean; error?: string }> {
     if (!isSupabaseConfigured) {
       localTasksMemory = localTasksMemory.map(t => {
         if (t.id === id) {
           return {
             ...t,
-            ...updates,
+            ...details,
             version: (t.version || 1) + 1,
             updated_at: new Date().toISOString()
           }
@@ -323,14 +312,13 @@ export const taskService = {
     }
 
     try {
-      // Filter updates to only valid table columns
       const sanitizedUpdates: Record<string, any> = {
         updated_at: new Date().toISOString()
       }
 
-      for (const [key, value] of Object.entries(updates)) {
-        if (VALID_TASK_COLUMNS.has(key)) {
-          sanitizedUpdates[key] = sanitizeColumnValue(value)
+      for (const [key, value] of Object.entries(details)) {
+        if (TASK_DETAIL_COLUMNS.has(key) && value !== undefined) {
+          sanitizedUpdates[key] = value === '' ? null : value
         }
       }
 
@@ -338,25 +326,27 @@ export const taskService = {
         .update(sanitizedUpdates)
         .eq('id', id)
 
-      // Optimistic Concurrency Control if version is provided
       if (currentVersion !== undefined) {
         query = query.eq('version', currentVersion)
       }
 
       const { error } = await query
       if (error) {
-        console.error('[taskService.updateTask] Update error:', error)
-        return { success: false, error: error.message || 'No se pudo actualizar la tarea.' }
+        console.error('[taskService.updateTaskDetails] Error:', error)
+        return { success: false, error: error.message }
       }
 
       return { success: true }
     } catch (err: any) {
-      console.error('[taskService.updateTask] Exception:', err)
-      return { success: false, error: err.message || 'Error inesperado al actualizar la tarea.' }
+      return { success: false, error: err.message }
     }
   },
 
-  async toggleSubtask(taskId: string, subtaskId: string, isCompleted: boolean, _userId?: string): Promise<{ success: boolean; progress?: number; error?: string }> {
+  async updateTask(id: string, updates: Partial<Task>, currentVersion?: number): Promise<{ success: boolean; error?: string }> {
+    return this.updateTaskDetails(id, updates as any, currentVersion)
+  },
+
+  async toggleSubtask(taskId: string, subtaskId: string, isCompleted: boolean): Promise<{ success: boolean; progress?: number; error?: string }> {
     if (!isSupabaseConfigured) {
       let updatedProgress = 0
       localTasksMemory = localTasksMemory.map(t => {
@@ -511,56 +501,183 @@ export const taskService = {
       third_party_contact?: string
     }
   ): Promise<{ success: boolean; error?: string }> {
-    const { data: authData } = await supabase.auth.getUser()
-    const currentUserId = authData.user?.id
-
-    const updates: Partial<Task> = {
-      status: newStatus,
-      updated_at: new Date().toISOString()
+    if (!isSupabaseConfigured) {
+      localTasksMemory = localTasksMemory.map(t => {
+        if (t.id === taskId) {
+          return {
+            ...t,
+            status: newStatus,
+            progress_percentage: newStatus === 'completada' ? 100 : t.progress_percentage,
+            blocked_reason: newStatus === 'bloqueada' ? (extra?.blocked_reason || 'Sin motivo') : null,
+            blocked_at: newStatus === 'bloqueada' ? new Date().toISOString() : null,
+            completed_at: newStatus === 'completada' ? new Date().toISOString() : null,
+            completed_by: newStatus === 'completada' ? 'u1' : null,
+            third_party_name: newStatus === 'esperando_tercero' ? (extra?.third_party_name || null) : t.third_party_name,
+            third_party_reason: newStatus === 'esperando_tercero' ? (extra?.third_party_reason || null) : t.third_party_reason,
+            third_party_promised_date: newStatus === 'esperando_tercero' ? (extra?.third_party_promised_date || null) : t.third_party_promised_date,
+            third_party_contact: newStatus === 'esperando_tercero' ? (extra?.third_party_contact || null) : t.third_party_contact,
+            updated_at: new Date().toISOString()
+          }
+        }
+        return t
+      })
+      return { success: true }
     }
 
-    if (newStatus === 'completada') {
-      updates.progress_percentage = 100
-      updates.completed_at = new Date().toISOString()
-      updates.completed_by = currentUserId || null
-    } else {
-      updates.completed_at = null
-      updates.completed_by = null
-    }
+    try {
+      const { data: authData } = await supabase.auth.getUser()
+      const currentUserId = authData.user?.id
 
-    if (newStatus === 'bloqueada') {
-      updates.blocked_reason = extra?.blocked_reason || 'Sin motivo'
-      updates.blocked_at = new Date().toISOString()
-    } else {
-      updates.blocked_reason = null
-      updates.blocked_at = null
-    }
+      const updates: Record<string, any> = {
+        status: newStatus,
+        updated_at: new Date().toISOString()
+      }
 
-    if (newStatus === 'esperando_tercero' && extra) {
-      updates.third_party_name = extra.third_party_name || null
-      updates.third_party_reason = extra.third_party_reason || null
-      updates.third_party_promised_date = extra.third_party_promised_date || null
-      updates.third_party_contact = extra.third_party_contact || null
-    }
+      if (newStatus === 'completada') {
+        updates.progress_percentage = 100
+        updates.completed_at = new Date().toISOString()
+        updates.completed_by = currentUserId || null
+      } else {
+        updates.completed_at = null
+        updates.completed_by = null
+      }
 
-    return this.updateTask(taskId, updates)
+      if (newStatus === 'bloqueada') {
+        updates.blocked_reason = extra?.blocked_reason || 'Sin motivo especificado'
+        updates.blocked_at = new Date().toISOString()
+      } else {
+        updates.blocked_reason = null
+        updates.blocked_at = null
+      }
+
+      if (newStatus === 'esperando_tercero' && extra) {
+        updates.third_party_name = extra.third_party_name || null
+        updates.third_party_reason = extra.third_party_reason || null
+        updates.third_party_promised_date = extra.third_party_promised_date || null
+        updates.third_party_contact = extra.third_party_contact || null
+      }
+
+      const { error } = await (supabase.from('tasks') as any)
+        .update(updates)
+        .eq('id', taskId)
+
+      if (error) {
+        console.error('[taskService.updateTaskStatus] Error:', error)
+        return { success: false, error: error.message }
+      }
+
+      return { success: true }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
   },
 
-  async archiveTask(taskId: string, _userId?: string): Promise<{ success: boolean; error?: string }> {
-    const { data: authData } = await supabase.auth.getUser()
-    const currentUserId = authData.user?.id
+  async updateTaskProgress(taskId: string, progress: number): Promise<{ success: boolean; error?: string }> {
+    if (!isSupabaseConfigured) {
+      localTasksMemory = localTasksMemory.map(t => {
+        if (t.id === taskId) {
+          return {
+            ...t,
+            progress_percentage: progress,
+            is_progress_manual: true,
+            updated_at: new Date().toISOString()
+          }
+        }
+        return t
+      })
+      return { success: true }
+    }
 
-    return this.updateTask(taskId, {
-      archived_at: new Date().toISOString(),
-      archived_by: currentUserId || null
-    })
+    try {
+      const { error } = await (supabase.from('tasks') as any)
+        .update({
+          progress_percentage: progress,
+          is_progress_manual: true,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', taskId)
+
+      if (error) {
+        console.error('[taskService.updateTaskProgress] Error:', error)
+        return { success: false, error: error.message }
+      }
+      return { success: true }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  },
+
+  async archiveTask(taskId: string): Promise<{ success: boolean; error?: string }> {
+    if (!isSupabaseConfigured) {
+      localTasksMemory = localTasksMemory.map(t => {
+        if (t.id === taskId) {
+          return {
+            ...t,
+            archived_at: new Date().toISOString(),
+            archived_by: 'u1',
+            updated_at: new Date().toISOString()
+          }
+        }
+        return t
+      })
+      return { success: true }
+    }
+
+    try {
+      const { data: authData } = await supabase.auth.getUser()
+      const currentUserId = authData.user?.id
+
+      const { error } = await (supabase.from('tasks') as any)
+        .update({
+          archived_at: new Date().toISOString(),
+          archived_by: currentUserId || null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', taskId)
+
+      if (error) {
+        console.error('[taskService.archiveTask] Error:', error)
+        return { success: false, error: error.message }
+      }
+      return { success: true }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
   },
 
   async restoreTask(taskId: string): Promise<{ success: boolean; error?: string }> {
-    return this.updateTask(taskId, {
-      archived_at: null,
-      archived_by: null
-    })
+    if (!isSupabaseConfigured) {
+      localTasksMemory = localTasksMemory.map(t => {
+        if (t.id === taskId) {
+          return {
+            ...t,
+            archived_at: null,
+            archived_by: null,
+            updated_at: new Date().toISOString()
+          }
+        }
+        return t
+      })
+      return { success: true }
+    }
+
+    try {
+      const { error } = await (supabase.from('tasks') as any)
+        .update({
+          archived_at: null,
+          archived_by: null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', taskId)
+
+      if (error) {
+        console.error('[taskService.restoreTask] Error:', error)
+        return { success: false, error: error.message }
+      }
+      return { success: true }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
   },
 
   async addComment(taskId: string, _profileId: string, content: string): Promise<{ success: boolean; data?: Comment; error?: string }> {
