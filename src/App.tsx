@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
+import { ErrorBoundary } from './components/common/ErrorBoundary'
 import { Header, type MainNavTab } from './components/common/Header'
 import { BottomNav, type NavTab } from './components/common/BottomNav'
 import { OfflineBanner } from './components/common/OfflineBanner'
@@ -26,11 +27,13 @@ import { notificationService } from './services/notificationService'
 import { activityService, type ActivityItem } from './services/activityService'
 import type { TaskWithDetails, Area, Profile, Notification } from './types'
 import { isSupabaseConfigured } from './lib/supabase'
-import { Loader2, AlertTriangle, Plus } from 'lucide-react'
+import { Loader2, AlertTriangle, RotateCcw, LogOut, Plus } from 'lucide-react'
 import puntoBurgerIcon from './assets/brand/punto-burger-icon.png'
 
+const DATA_TIMEOUT_MS = 12000
+
 const MainApp: React.FC = () => {
-  const { session, user, profile, isAdmin, loading: authLoading } = useAuth()
+  const { session, user, profile, isAdmin, loading: authLoading, logout } = useAuth()
   const [authView, setAuthView] = useState<'login' | 'forgot_password'>('login')
   const [showUpdatePassword, setShowUpdatePassword] = useState(false)
 
@@ -52,7 +55,10 @@ const MainApp: React.FC = () => {
   const [activity, setActivity] = useState<ActivityItem[]>([])
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [unreadCount, setUnreadCount] = useState<number>(0)
-  const [isLoadingData, setIsLoadingData] = useState(true)
+  
+  // Independent loading & error states
+  const [isLoadingData, setIsLoadingData] = useState(false)
+  const [dataLoadError, setDataLoadError] = useState<string | null>(null)
 
   // Modal / Drawer states
   const [selectedTask, setSelectedTask] = useState<TaskWithDetails | null>(null)
@@ -66,49 +72,86 @@ const MainApp: React.FC = () => {
   const [showTagManagerModal, setShowTagManagerModal] = useState(false)
   const [showSettingsModal, setShowSettingsModal] = useState(false)
 
-  // Load project data
-  const loadData = async () => {
+  const loadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Resilient data loading
+  const loadData = useCallback(async () => {
     setIsLoadingData(true)
+    setDataLoadError(null)
+
+    // Set a controlled watchdog timeout
+    if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current)
+    loadTimeoutRef.current = setTimeout(() => {
+      setIsLoadingData(false)
+      setDataLoadError('El servidor tardó demasiado en responder. Comprobá tu conexión a Internet o reintentá.')
+    }, DATA_TIMEOUT_MS)
+
     try {
-      const [loadedTasks, loadedAreas, loadedProfiles, loadedActivity, loadedNotifications, unread] = await Promise.all([
+      // 1. Critical data: tasks, areas, profiles
+      const [loadedTasks, loadedAreas, loadedProfiles] = await Promise.all([
         taskService.getTasks(),
         areaService.getAreas(),
-        profileService.getProfiles(),
-        activityService.getRecentActivity(15),
-        notificationService.getNotifications(30),
-        notificationService.getUnreadCount()
+        profileService.getProfiles()
       ])
 
       setTasks(loadedTasks)
       setAreas(loadedAreas)
       setProfiles(loadedProfiles)
-      setActivity(loadedActivity)
-      setNotifications(loadedNotifications)
-      setUnreadCount(unread)
 
       if (selectedTask) {
         const refreshed = loadedTasks.find(t => t.id === selectedTask.id)
         if (refreshed) setSelectedTask(refreshed)
       }
-    } catch (err) {
+
+      // 2. Non-critical secondary data: activity & notifications (failures won't block the app)
+      Promise.allSettled([
+        activityService.getRecentActivity(15),
+        notificationService.getNotifications(30),
+        notificationService.getUnreadCount()
+      ]).then(([activityRes, notifRes, unreadRes]) => {
+        if (activityRes.status === 'fulfilled') {
+          setActivity(activityRes.value)
+        }
+        if (notifRes.status === 'fulfilled') {
+          setNotifications(notifRes.value)
+        }
+        if (unreadRes.status === 'fulfilled') {
+          setUnreadCount(unreadRes.value)
+        }
+      })
+
+    } catch (err: any) {
       console.error('[App] Error loading data:', err)
+      setDataLoadError(err?.message || 'No pudimos cargar la información. Revisá tu conexión o intentá nuevamente.')
     } finally {
+      if (loadTimeoutRef.current) {
+        clearTimeout(loadTimeoutRef.current)
+        loadTimeoutRef.current = null
+      }
       setIsLoadingData(false)
+    }
+  }, [selectedTask])
+
+  const refreshNotifications = async () => {
+    try {
+      const [loadedNotifications, unread] = await Promise.all([
+        notificationService.getNotifications(30),
+        notificationService.getUnreadCount()
+      ])
+      setNotifications(loadedNotifications)
+      setUnreadCount(unread)
+    } catch (err) {
+      console.warn('[App] Error refreshing notifications:', err)
     }
   }
 
-  const refreshNotifications = async () => {
-    const [loadedNotifications, unread] = await Promise.all([
-      notificationService.getNotifications(30),
-      notificationService.getUnreadCount()
-    ])
-    setNotifications(loadedNotifications)
-    setUnreadCount(unread)
-  }
-
+  // Trigger data load when session exists
   useEffect(() => {
     if (session || !isSupabaseConfigured) {
       loadData()
+    }
+    return () => {
+      if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current)
     }
   }, [session, isAdmin])
 
@@ -120,9 +163,10 @@ const MainApp: React.FC = () => {
     }
   }, [])
 
-  if (authLoading || isLoadingData) {
+  // 1. Auth check loading state ONLY
+  if (authLoading) {
     return (
-      <div className="min-h-screen bg-[#FAF7F2] flex flex-col items-center justify-center p-4">
+      <div className="min-h-screen bg-[#FAF7F2] flex flex-col items-center justify-center p-4 selection:bg-[#C92A2A] selection:text-white">
         <div className="flex items-center justify-center mb-4 animate-bounce">
           <img
             src={puntoBurgerIcon}
@@ -132,13 +176,13 @@ const MainApp: React.FC = () => {
         </div>
         <div className="flex items-center gap-2 text-[#18181B] font-bold text-base">
           <Loader2 className="w-5 h-5 animate-spin text-[#C92A2A]" />
-          <span>Cargando Punto Burger | Tareas...</span>
+          <span>Verificando sesión...</span>
         </div>
       </div>
     )
   }
 
-  // Not authenticated
+  // 2. Not authenticated: render Login immediately without blocking!
   if (!session || !user) {
     return (
       <div className="min-h-screen bg-[#FAF7F2]">
@@ -160,16 +204,78 @@ const MainApp: React.FC = () => {
     )
   }
 
-  // Account inactive / disabled notice
+  // 3. Account inactive / disabled notice
   if (profile && !profile.is_active) {
     return (
       <div className="min-h-screen bg-[#FAF7F2] flex flex-col items-center justify-center p-4 text-center">
-        <div className="bg-white p-8 rounded-3xl border border-[#E8E2D9] max-w-md shadow-xl space-y-4">
+        <div className="bg-white p-8 rounded-3xl border border-[#E8E2D9] max-w-md shadow-xl space-y-4 animate-in fade-in">
           <AlertTriangle className="w-12 h-12 text-[#C92A2A] mx-auto" />
           <h2 className="text-xl font-bold text-[#18181B]">Cuenta Desactivada</h2>
-          <p className="text-sm text-[#71717A]">
-            Tu acceso a Punto Burger ha sido pausado. Contacta al administrador para habilitar tu usuario.
+          <p className="text-sm text-[#71717A] leading-relaxed">
+            Tu acceso a Punto Burger ha sido pausado por el administrador.
           </p>
+          <button
+            type="button"
+            onClick={logout}
+            className="mt-4 px-4 py-2.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 text-xs font-bold rounded-xl transition-all cursor-pointer inline-flex items-center gap-1.5"
+          >
+            <LogOut className="w-4 h-4" />
+            <span>Cerrar Sesión</span>
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // 4. Critical Data Loading Error (Recoverable view)
+  if (dataLoadError && tasks.length === 0) {
+    return (
+      <div className="min-h-screen bg-[#FAF7F2] flex flex-col items-center justify-center p-4">
+        <div className="bg-white p-8 rounded-3xl border border-[#E8E2D9] max-w-md w-full shadow-xl space-y-5 text-center animate-in fade-in">
+          <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center mx-auto">
+            <AlertTriangle className="w-6 h-6" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-lg font-black text-[#18181B]">No se pudo cargar la información</h2>
+            <p className="text-xs text-[#71717A] leading-relaxed">{dataLoadError}</p>
+          </div>
+          <div className="space-y-2 pt-2">
+            <button
+              type="button"
+              onClick={() => loadData()}
+              className="w-full py-3 bg-[#C92A2A] hover:bg-[#B02525] text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <RotateCcw className="w-4 h-4" />
+              <span>Reintentar</span>
+            </button>
+            <button
+              type="button"
+              onClick={logout}
+              className="w-full py-2.5 text-xs font-semibold text-[#71717A] hover:text-[#C92A2A] transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Cerrar Sesión</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // 5. Initial Data Loading Spinner for authenticated users
+  if (isLoadingData && tasks.length === 0) {
+    return (
+      <div className="min-h-screen bg-[#FAF7F2] flex flex-col items-center justify-center p-4 selection:bg-[#C92A2A] selection:text-white">
+        <div className="flex items-center justify-center mb-4 animate-bounce">
+          <img
+            src={puntoBurgerIcon}
+            alt="Punto Burger"
+            className="w-16 h-16 object-contain drop-shadow-md"
+          />
+        </div>
+        <div className="flex items-center gap-2 text-[#18181B] font-bold text-base">
+          <Loader2 className="w-5 h-5 animate-spin text-[#C92A2A]" />
+          <span>Cargando tablero operativo...</span>
         </div>
       </div>
     )
@@ -367,8 +473,10 @@ const MainApp: React.FC = () => {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <MainApp />
-    </AuthProvider>
+    <ErrorBoundary fallbackTitle="Error en Punto Burger | Tareas">
+      <AuthProvider>
+        <MainApp />
+      </AuthProvider>
+    </ErrorBoundary>
   )
 }

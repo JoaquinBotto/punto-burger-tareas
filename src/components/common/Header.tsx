@@ -105,7 +105,7 @@ export const Header: React.FC<HeaderProps> = ({
                 Tareas
               </span>
               <span className="text-[10px] font-mono text-zinc-400 bg-zinc-100 px-1.5 py-0.5 rounded">
-                v1.1.0
+                v1.1.1
               </span>
               <span className="hidden xl:inline text-[11px] text-[#71717A] font-medium pl-1">
                 • {todayFormatted}
