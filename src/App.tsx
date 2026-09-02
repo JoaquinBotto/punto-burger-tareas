@@ -394,15 +394,17 @@ const MainApp: React.FC = () => {
       />
 
       {/* Task Detail Drawer */}
-      <TaskDetailDrawer
-        task={selectedTask}
-        allTasks={tasks}
-        areas={areas}
-        profiles={profiles}
-        isOpen={Boolean(selectedTask)}
-        onClose={() => setSelectedTask(null)}
-        onTaskUpdated={loadData}
-      />
+      <ErrorBoundary fallbackTitle="Error al abrir el detalle de la tarea">
+        <TaskDetailDrawer
+          task={selectedTask}
+          allTasks={tasks}
+          areas={areas}
+          profiles={profiles}
+          isOpen={Boolean(selectedTask)}
+          onClose={() => setSelectedTask(null)}
+          onTaskUpdated={loadData}
+        />
+      </ErrorBoundary>
 
       {/* Notifications Drawer */}
       <NotificationsDrawer

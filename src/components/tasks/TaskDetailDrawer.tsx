@@ -3,7 +3,7 @@ import type { TaskWithDetails, TaskStatus, TaskPriority, Area, Profile } from '.
 import { taskService } from '../../services/taskService'
 import { attachmentService } from '../../services/attachmentService'
 import { useAuth } from '../../contexts/AuthContext'
-import { formatDueDate, getTimeDifferenceDescription } from '../../lib/dateUtils'
+import { formatDueDate, getTimeDifferenceDescription, safeFormatDate, safeFormatTime } from '../../lib/dateUtils'
 import { ConfirmationModal } from '../common/ConfirmationModal'
 import { StateChangeModal } from '../common/StateChangeModal'
 import {
@@ -95,11 +95,19 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
   const [checklistFilter, setChecklistFilter] = useState<'all' | 'pending' | 'completed'>('all')
   const [subtaskSearch, setSubtaskSearch] = useState('')
 
+  // Dependency Type state
+  const [selectedDependencyType, setSelectedDependencyType] = useState<'blocking' | 'coordination'>('blocking')
+
+  // Attachment state
+  const [isUploadingAttachment, setIsUploadingAttachment] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [activeLightboxUrl, setActiveLightboxUrl] = useState<string | null>(null)
+
   if (!isOpen || !task) return null
 
-  const isAssigned = task.main_assignee_id === user?.id || task.assignees?.some(a => a.id === user?.id)
+  const isAssigned = task.main_assignee_id === user?.id || (task.assignees || []).some(a => a.id === user?.id)
   const canEdit = isAdmin || isAssigned
-  const totalSubtasks = task.subtasks?.length || 0
+  const totalSubtasks = (task.subtasks || []).length
   const isCompleted = task.status === 'completada'
 
   const displayedSubtasks = (task.subtasks || []).filter(st => {
@@ -110,9 +118,6 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
     }
     return true
   })
-
-  // Dependency Type state
-  const [selectedDependencyType, setSelectedDependencyType] = useState<'blocking' | 'coordination'>('blocking')
 
   // Save Task Details (Title, Description, Area, Priority, Dates, Assignee)
   const handleSaveDetails = async (e: React.FormEvent) => {
@@ -306,11 +311,6 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
       setActionError(res.error || 'No se pudo eliminar la dependencia.')
     }
   }
-
-  // Attachment state
-  const [isUploadingAttachment, setIsUploadingAttachment] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
-  const [activeLightboxUrl, setActiveLightboxUrl] = useState<string | null>(null)
 
   // File Upload
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -904,7 +904,7 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
                     <div key={c.id} className="p-4 rounded-2xl bg-[#FAF7F2] border border-[#E8E2D9] space-y-1">
                       <div className="flex items-center justify-between text-xs">
                         <span className="font-bold text-[#18181B]">{c.profile?.full_name || 'Usuario'}</span>
-                        <span className="text-[#A1A1AA] text-[11px]">{new Date(c.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        <span className="text-[#A1A1AA] text-[11px]">{safeFormatTime(c.created_at)}</span>
                       </div>
                       <p className="text-xs text-[#3F3F46] leading-relaxed">{c.content}</p>
                     </div>
@@ -994,7 +994,7 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
                               {att.file_name}
                             </span>
                             <span className="text-[#71717A] text-[11px] block">
-                              {Math.round(att.file_size / 1024)} KB • {new Date(att.created_at).toLocaleDateString([], { day: '2-digit', month: 'short' })}
+                              {Math.round((att.file_size || 0) / 1024)} KB • {safeFormatDate(att.created_at)}
                             </span>
                           </div>
                         </div>
@@ -1105,14 +1105,14 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
                   Tareas Posteriores (Bloqueadas por esta tarea)
                 </h4>
 
-                {allTasks.filter(t => t.dependencies?.some(d => d.blocking_task_id === task.id)).length === 0 ? (
+                {(allTasks || []).filter(t => (t.dependencies || []).some(d => d.blocking_task_id === task.id)).length === 0 ? (
                   <div className="p-4 rounded-2xl bg-zinc-50 border border-dashed border-zinc-200 text-center text-xs text-[#71717A]">
                     Ninguna otra tarea depende directamente de la finalización de esta.
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {allTasks
-                      .filter(t => t.dependencies?.some(d => d.blocking_task_id === task.id))
+                    {(allTasks || [])
+                      .filter(t => (t.dependencies || []).some(d => d.blocking_task_id === task.id))
                       .map(downstream => (
                         <div key={downstream.id} className="p-3 rounded-2xl bg-indigo-50/50 border border-indigo-200 flex items-center justify-between text-xs">
                           <span className="font-bold text-indigo-950 truncate">{downstream.title}</span>
@@ -1132,14 +1132,14 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
                     Historial de Bloqueos ({task.blocks.length})
                   </h4>
                   <div className="space-y-2 max-h-48 overflow-y-auto">
-                    {task.blocks.map(b => (
+                    {(task.blocks || []).map(b => (
                       <div key={b.id} className="p-3 rounded-2xl bg-zinc-50 border border-zinc-200 text-xs space-y-1">
                         <div className="flex items-center justify-between">
                           <span className={`font-bold ${b.resolved_at ? 'text-zinc-700' : 'text-red-700'}`}>
                             {b.resolved_at ? 'Bloqueo Resuelto' : 'Bloqueo Activo'}
                           </span>
                           <span className="text-[10px] text-zinc-400">
-                            {new Date(b.blocked_at).toLocaleDateString([], { day: '2-digit', month: 'short' })}
+                            {safeFormatDate(b.blocked_at)}
                           </span>
                         </div>
                         <p className="text-zinc-700"><strong className="text-zinc-900">Motivo:</strong> {b.reason}</p>
@@ -1149,7 +1149,7 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
                         {b.resolved_at && (
                           <div className="text-[11px] text-green-700 pt-1 border-t border-zinc-200/60 flex items-center justify-between">
                             <span>Resuelto: {b.resolution_comment || 'Desbloqueada'}</span>
-                            <span>{new Date(b.resolved_at).toLocaleDateString([], { day: '2-digit', month: 'short' })}</span>
+                            <span>{safeFormatDate(b.resolved_at)}</span>
                           </div>
                         )}
                       </div>

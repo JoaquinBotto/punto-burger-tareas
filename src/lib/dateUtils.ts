@@ -156,3 +156,46 @@ export function getTimeDifferenceDescription(dateString: string | null, timeStri
   if (daysLeft === 1) return 'Vence mañana'
   return `Quedan ${daysLeft} días`
 }
+
+/**
+ * Safely formats any date string/object without throwing runtime exceptions
+ */
+export function safeFormatDate(
+  value: string | Date | null | undefined,
+  fallback = 'Sin fecha',
+  options: Intl.DateTimeFormatOptions = { day: '2-digit', month: 'short' }
+): string {
+  if (!value) return fallback
+  try {
+    const d = typeof value === 'string' ? new Date(value) : value
+    if (isNaN(d.getTime())) return fallback
+    return new Intl.DateTimeFormat('es-AR', {
+      timeZone: TIMEZONE_CORDOBA,
+      ...options
+    }).format(d)
+  } catch {
+    return fallback
+  }
+}
+
+/**
+ * Safely formats any time string/object without throwing runtime exceptions
+ */
+export function safeFormatTime(
+  value: string | Date | null | undefined,
+  fallback = ''
+): string {
+  if (!value) return fallback
+  try {
+    const d = typeof value === 'string' ? new Date(value) : value
+    if (isNaN(d.getTime())) return fallback
+    return new Intl.DateTimeFormat('es-AR', {
+      timeZone: TIMEZONE_CORDOBA,
+      hour: '2-digit',
+      minute: '2-digit'
+    }).format(d)
+  } catch {
+    return fallback
+  }
+}
+
