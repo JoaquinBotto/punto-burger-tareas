@@ -42,7 +42,6 @@ const MainApp: React.FC = () => {
     isPasswordRecovery,
     recoveryError,
     logout,
-    refreshProfile,
     clearRecoveryState
   } = useAuth()
   const [authView, setAuthView] = useState<'login' | 'forgot_password'>('login')
@@ -171,9 +170,10 @@ const MainApp: React.FC = () => {
       <div className="min-h-screen bg-[#FAF7F2]">
         <UpdatePasswordModal
           initialError={recoveryError}
-          onSuccess={() => {
+          onSuccess={async () => {
             clearRecoveryState()
-            refreshProfile()
+            await logout()
+            setAuthView('login')
           }}
           onCancel={() => {
             clearRecoveryState()
