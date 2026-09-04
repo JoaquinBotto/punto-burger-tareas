@@ -40,6 +40,7 @@ const MainApp: React.FC = () => {
     isAdmin,
     loading: authLoading,
     isPasswordRecovery,
+    authRecoveryMode,
     recoveryError,
     logout,
     clearRecoveryState
@@ -170,6 +171,7 @@ const MainApp: React.FC = () => {
       <div className="min-h-screen bg-[#FAF7F2]">
         <UpdatePasswordModal
           initialError={recoveryError}
+          mode={authRecoveryMode || 'recovery'}
           onSuccess={async () => {
             clearRecoveryState()
             await logout()

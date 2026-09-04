@@ -48,8 +48,49 @@ export const profileService = {
         body: payload
       })
 
-      if (error) return { success: false, error: error.message }
-      if (data?.error) return { success: false, error: data.error }
+      if (error) {
+        let userFacingError = error.message
+
+        // Extract context JSON if available in FunctionsHttpError
+        if ('context' in error && error.context) {
+          try {
+            const ctxResponse = error.context as Response
+            const cloned = ctxResponse.clone()
+            const errorJson = await cloned.json()
+            if (errorJson?.message) {
+              userFacingError = errorJson.message
+            } else if (errorJson?.error) {
+              userFacingError = errorJson.error
+            }
+          } catch {
+            try {
+              const ctxResponse = error.context as Response
+              const errorText = await ctxResponse.clone().text()
+              if (errorText) userFacingError = errorText
+            } catch {}
+          }
+        }
+
+        // Map common raw messages to user-friendly Spanish
+        const lower = userFacingError.toLowerCase()
+        if (lower.includes('rate limit') || lower.includes('too many requests') || lower.includes('over_email_send_rate_limit')) {
+          userFacingError = 'Se alcanzó el límite temporal de envío de correos. Por favor espera unos minutos antes de reenviar.'
+        } else if (lower.includes('already registered') || lower.includes('user_already_exists')) {
+          userFacingError = 'Este correo ya pertenece a un usuario registrado en Punto Burger.'
+        } else if (lower.includes('non-2xx status code')) {
+          userFacingError = 'No se pudo completar la invitación. Verifica los permisos de administrador o el estado del servidor.'
+        }
+
+        return { success: false, error: userFacingError }
+      }
+
+      if (data?.error) {
+        return { success: false, error: data.error }
+      }
+
+      if (data?.ok === false && data?.message) {
+        return { success: false, error: data.message }
+      }
 
       return { success: true, user: data?.user }
     } catch (err: any) {

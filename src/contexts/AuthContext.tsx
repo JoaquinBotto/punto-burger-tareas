@@ -3,6 +3,8 @@ import type { User, Session } from '@supabase/supabase-js'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import type { Profile, UserRole } from '../types'
 
+export type AuthRecoveryMode = 'recovery' | 'invite' | null
+
 interface AuthContextType {
   session: Session | null
   user: User | null
@@ -15,6 +17,7 @@ interface AuthContextType {
   loading: boolean
   error: string | null
   isPasswordRecovery: boolean
+  authRecoveryMode: AuthRecoveryMode
   recoveryError: string | null
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>
   logout: () => Promise<void>
@@ -34,12 +37,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
   const [isPasswordRecovery, setIsPasswordRecovery] = useState<boolean>(false)
+  const [authRecoveryMode, setAuthRecoveryMode] = useState<AuthRecoveryMode>(null)
   const [recoveryError, setRecoveryError] = useState<string | null>(null)
 
   const clearError = () => setError(null)
   
   const clearRecoveryState = () => {
     setIsPasswordRecovery(false)
+    setAuthRecoveryMode(null)
     setRecoveryError(null)
     if (typeof window !== 'undefined') {
       window.history.replaceState({}, document.title, '/')
@@ -94,21 +99,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const search = window.location.search || ''
       const pathname = window.location.pathname || ''
 
-      const isRecoveryTarget =
-        pathname === '/update-password' ||
-        hash.includes('type=recovery') ||
-        hash.includes('type=invite') ||
-        search.includes('code=')
+      const isInviteTarget = pathname === '/accept-invite' || hash.includes('type=invite') || search.includes('type=invite')
+      const isRecoveryTarget = pathname === '/update-password' || hash.includes('type=recovery') || search.includes('code=')
 
-      if (isRecoveryTarget) {
+      if (isInviteTarget) {
         setIsPasswordRecovery(true)
+        setAuthRecoveryMode('invite')
+      } else if (isRecoveryTarget) {
+        setIsPasswordRecovery(true)
+        setAuthRecoveryMode('recovery')
       }
 
       if (hash.includes('error=') || search.includes('error=')) {
         if (hash.includes('otp_expired') || hash.includes('expired') || search.includes('otp_expired')) {
-          setRecoveryError('El enlace de recuperación venció o ya fue utilizado. Solicitá uno nuevo.')
+          setRecoveryError('El enlace venció o ya fue utilizado. Solicitá uno nuevo.')
         } else {
-          setRecoveryError('El enlace de recuperación no es válido o está incompleto. Solicitá uno nuevo.')
+          setRecoveryError('El enlace no es válido o está incompleto. Solicitá uno nuevo.')
         }
         setIsPasswordRecovery(true)
       }
@@ -133,12 +139,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (event === 'PASSWORD_RECOVERY') {
           setIsPasswordRecovery(true)
+          setAuthRecoveryMode('recovery')
           setRecoveryError(null)
         }
 
         if (event === 'SIGNED_OUT') {
           setProfile(null)
           setIsPasswordRecovery(false)
+          setAuthRecoveryMode(null)
           setRecoveryError(null)
           setLoading(false)
           return
@@ -254,6 +262,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setProfile(null)
     setError(null)
     setIsPasswordRecovery(false)
+    setAuthRecoveryMode(null)
     setRecoveryError(null)
   }
 
@@ -326,6 +335,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loading,
         error,
         isPasswordRecovery,
+        authRecoveryMode,
         recoveryError,
         login,
         logout,

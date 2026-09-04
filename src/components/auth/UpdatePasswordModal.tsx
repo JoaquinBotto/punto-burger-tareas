@@ -1,18 +1,20 @@
 import React, { useState } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
-import { Lock, CheckCircle2, AlertCircle, Loader2, KeyRound, ArrowLeft } from 'lucide-react'
+import { Lock, CheckCircle2, AlertCircle, Loader2, KeyRound, ArrowLeft, UserCheck } from 'lucide-react'
 import puntoBurgerLogo from '../../assets/brand/punto-burger-logo.png'
 
 interface UpdatePasswordModalProps {
   onSuccess: () => void
   onCancel?: () => void
   initialError?: string | null
+  mode?: 'recovery' | 'invite'
 }
 
 export const UpdatePasswordModal: React.FC<UpdatePasswordModalProps> = ({
   onSuccess,
   onCancel,
-  initialError
+  initialError,
+  mode = 'recovery'
 }) => {
   const { updatePassword } = useAuth()
   const [password, setPassword] = useState('')
@@ -20,6 +22,8 @@ export const UpdatePasswordModal: React.FC<UpdatePasswordModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isUpdatedSuccess, setIsUpdatedSuccess] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(initialError || null)
+
+  const isInviteMode = mode === 'invite'
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -42,7 +46,7 @@ export const UpdatePasswordModal: React.FC<UpdatePasswordModalProps> = ({
     if (result.success) {
       setIsUpdatedSuccess(true)
     } else {
-      setErrorMsg(result.error || 'No se pudo actualizar la contraseña. Solicitá un nuevo enlace.')
+      setErrorMsg(result.error || 'No se pudo guardar la contraseña. Solicitá un nuevo enlace.')
     }
   }
 
@@ -62,9 +66,13 @@ export const UpdatePasswordModal: React.FC<UpdatePasswordModalProps> = ({
           <div className="p-6 rounded-2xl bg-green-50 border border-green-200 text-center space-y-4">
             <CheckCircle2 className="w-14 h-14 text-[#16A34A] mx-auto" />
             <div className="space-y-1">
-              <h3 className="text-lg font-black text-green-950">¡Contraseña actualizada!</h3>
+              <h3 className="text-lg font-black text-green-950">
+                {isInviteMode ? '¡Cuenta activada con éxito!' : '¡Contraseña actualizada!'}
+              </h3>
               <p className="text-xs sm:text-sm text-green-800 leading-relaxed">
-                Tu clave ha sido reestablecida exitosamente. Ya puedes acceder al sistema.
+                {isInviteMode
+                  ? 'Tu contraseña ha sido establecida. Ya puedes iniciar sesión en Punto Burger | Tareas.'
+                  : 'Tu clave ha sido reestablecida exitosamente. Ya puedes iniciar sesión.'}
               </p>
             </div>
             <button
@@ -72,18 +80,22 @@ export const UpdatePasswordModal: React.FC<UpdatePasswordModalProps> = ({
               onClick={onSuccess}
               className="w-full py-3.5 bg-[#18181B] hover:bg-black text-white text-sm font-bold rounded-xl shadow-md transition-all cursor-pointer"
             >
-              Ingresar al Tablero Operativo
+              Iniciar Sesión
             </button>
           </div>
         ) : (
           <>
             <div className="text-center space-y-1">
               <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-[#FFECEC] text-[#C92A2A] mb-2 mx-auto">
-                <KeyRound className="w-6 h-6" />
+                {isInviteMode ? <UserCheck className="w-6 h-6" /> : <KeyRound className="w-6 h-6" />}
               </div>
-              <h2 className="text-xl sm:text-2xl font-black text-[#18181B]">Establecer Nueva Contraseña</h2>
+              <h2 className="text-xl sm:text-2xl font-black text-[#18181B]">
+                {isInviteMode ? 'Bienvenido | Crear Contraseña' : 'Establecer Nueva Contraseña'}
+              </h2>
               <p className="text-xs sm:text-sm text-[#71717A]">
-                Ingresa una contraseña segura para tu cuenta de Punto Burger.
+                {isInviteMode
+                  ? 'Crea tu contraseña segura para activar tu cuenta de Punto Burger.'
+                  : 'Ingresa una contraseña segura para tu cuenta de Punto Burger.'}
               </p>
             </div>
 
@@ -116,7 +128,7 @@ export const UpdatePasswordModal: React.FC<UpdatePasswordModalProps> = ({
 
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-[#71717A] mb-1.5">
-                  Confirmar Nueva Contraseña
+                  Confirmar Contraseña
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#A1A1AA]">
@@ -146,7 +158,7 @@ export const UpdatePasswordModal: React.FC<UpdatePasswordModalProps> = ({
                 ) : (
                   <>
                     <CheckCircle2 className="w-5 h-5" />
-                    <span>Guardar y Continuar</span>
+                    <span>{isInviteMode ? 'Activar Cuenta' : 'Guardar y Continuar'}</span>
                   </>
                 )}
               </button>
