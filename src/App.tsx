@@ -33,9 +33,19 @@ import puntoBurgerIcon from './assets/brand/punto-burger-icon.png'
 const DATA_TIMEOUT_MS = 12000
 
 const MainApp: React.FC = () => {
-  const { session, user, profile, isAdmin, loading: authLoading, logout } = useAuth()
+  const {
+    session,
+    user,
+    profile,
+    isAdmin,
+    loading: authLoading,
+    isPasswordRecovery,
+    recoveryError,
+    logout,
+    refreshProfile,
+    clearRecoveryState
+  } = useAuth()
   const [authView, setAuthView] = useState<'login' | 'forgot_password'>('login')
-  const [showUpdatePassword, setShowUpdatePassword] = useState(false)
 
   // Navigation tab
   const [currentTab, setCurrentTab] = useState<MainNavTab>('dashboard')
@@ -155,15 +165,26 @@ const MainApp: React.FC = () => {
     }
   }, [session, isAdmin])
 
-  // Detect recovery or invite links from URL hash
-  useEffect(() => {
-    const hash = window.location.hash
-    if (hash.includes('type=recovery') || hash.includes('type=invite')) {
-      setShowUpdatePassword(true)
-    }
-  }, [])
+  // 1. Password Recovery Flow Overlay / View (takes precedence over all normal views)
+  if (isPasswordRecovery) {
+    return (
+      <div className="min-h-screen bg-[#FAF7F2]">
+        <UpdatePasswordModal
+          initialError={recoveryError}
+          onSuccess={() => {
+            clearRecoveryState()
+            refreshProfile()
+          }}
+          onCancel={() => {
+            clearRecoveryState()
+            setAuthView('login')
+          }}
+        />
+      </div>
+    )
+  }
 
-  // 1. Auth check loading state ONLY
+  // 2. Auth check loading state ONLY
   if (authLoading) {
     return (
       <div className="min-h-screen bg-[#FAF7F2] flex flex-col items-center justify-center p-4 selection:bg-[#C92A2A] selection:text-white">
@@ -182,19 +203,10 @@ const MainApp: React.FC = () => {
     )
   }
 
-  // 2. Not authenticated: render Login immediately without blocking!
+  // 3. Not authenticated: render Login immediately without blocking!
   if (!session || !user) {
     return (
       <div className="min-h-screen bg-[#FAF7F2]">
-        {showUpdatePassword && (
-          <UpdatePasswordModal
-            onSuccess={() => {
-              setShowUpdatePassword(false)
-              window.location.hash = ''
-            }}
-          />
-        )}
-
         {authView === 'login' ? (
           <LoginModal onForgotPassword={() => setAuthView('forgot_password')} />
         ) : (

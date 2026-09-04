@@ -14,12 +14,15 @@ interface AuthContextType {
   isActive: boolean
   loading: boolean
   error: string | null
+  isPasswordRecovery: boolean
+  recoveryError: string | null
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>
   logout: () => Promise<void>
   sendPasswordReset: (email: string) => Promise<{ success: boolean; error?: string }>
   updatePassword: (password: string) => Promise<{ success: boolean; error?: string }>
   refreshProfile: () => Promise<void>
   clearError: () => void
+  clearRecoveryState: () => void
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -30,8 +33,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState<boolean>(false)
+  const [recoveryError, setRecoveryError] = useState<string | null>(null)
 
   const clearError = () => setError(null)
+  
+  const clearRecoveryState = () => {
+    setIsPasswordRecovery(false)
+    setRecoveryError(null)
+    if (typeof window !== 'undefined') {
+      window.history.replaceState({}, document.title, '/')
+    }
+  }
 
   const fetchProfile = async (userId: string) => {
     if (!isSupabaseConfigured) {
@@ -75,6 +88,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return
     }
 
+    // Inspect URL for recovery parameters or errors at boot
+    if (typeof window !== 'undefined') {
+      const hash = window.location.hash || ''
+      const search = window.location.search || ''
+      const pathname = window.location.pathname || ''
+
+      const isRecoveryTarget =
+        pathname === '/update-password' ||
+        hash.includes('type=recovery') ||
+        hash.includes('type=invite') ||
+        search.includes('code=')
+
+      if (isRecoveryTarget) {
+        setIsPasswordRecovery(true)
+      }
+
+      if (hash.includes('error=') || search.includes('error=')) {
+        if (hash.includes('otp_expired') || hash.includes('expired') || search.includes('otp_expired')) {
+          setRecoveryError('El enlace de recuperación venció o ya fue utilizado. Solicitá uno nuevo.')
+        } else {
+          setRecoveryError('El enlace de recuperación no es válido o está incompleto. Solicitá uno nuevo.')
+        }
+        setIsPasswordRecovery(true)
+      }
+    }
+
     // 1. Initial Session Check
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
@@ -88,9 +127,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // 2. Listen to Auth State Changes
     const { data: authListener } = supabase.auth.onAuthStateChange(
-      async (_event, currentSession) => {
+      async (event, currentSession) => {
         setSession(currentSession)
         setUser(currentSession?.user ?? null)
+
+        if (event === 'PASSWORD_RECOVERY') {
+          setIsPasswordRecovery(true)
+          setRecoveryError(null)
+        }
+
+        if (event === 'SIGNED_OUT') {
+          setProfile(null)
+          setIsPasswordRecovery(false)
+          setRecoveryError(null)
+          setLoading(false)
+          return
+        }
 
         if (currentSession?.user) {
           await fetchProfile(currentSession.user.id)
@@ -201,6 +253,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null)
     setProfile(null)
     setError(null)
+    setIsPasswordRecovery(false)
+    setRecoveryError(null)
   }
 
   const sendPasswordReset = async (email: string) => {
@@ -209,18 +263,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     try {
+      const cleanEmail = email.trim().toLowerCase()
       const appOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://punto-burger-tareas.joaquinhbotto.workers.dev'
-      const { error: resetErr } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${appOrigin}/#type=recovery`,
+      const { error: resetErr } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+        redirectTo: `${appOrigin}/update-password`,
       })
 
       if (resetErr) {
+        const msg = resetErr.message.toLowerCase()
+        if (msg.includes('rate limit') || msg.includes('too many requests') || msg.includes('security purposes')) {
+          return { success: false, error: 'Demasiadas solicitudes. Por favor espera unos minutos antes de intentar nuevamente.' }
+        }
         return { success: false, error: resetErr.message }
       }
 
       return { success: true }
     } catch (err: any) {
-      return { success: false, error: err.message }
+      return { success: false, error: err.message || 'Error de conexión.' }
     }
   }
 
@@ -232,11 +291,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const { error: updateErr } = await supabase.auth.updateUser({ password })
       if (updateErr) {
+        const msg = updateErr.message.toLowerCase()
+        if (msg.includes('same password') || msg.includes('different')) {
+          return { success: false, error: 'La nueva contraseña debe ser diferente a la anterior.' }
+        }
+        if (msg.includes('at least') || msg.includes('short')) {
+          return { success: false, error: 'La contraseña debe tener al menos 6 caracteres.' }
+        }
         return { success: false, error: updateErr.message }
       }
       return { success: true }
     } catch (err: any) {
-      return { success: false, error: err.message }
+      return { success: false, error: err.message || 'Error al actualizar contraseña.' }
     }
   }
 
@@ -259,12 +325,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isActive,
         loading,
         error,
+        isPasswordRecovery,
+        recoveryError,
         login,
         logout,
         sendPasswordReset,
         updatePassword,
         refreshProfile,
         clearError,
+        clearRecoveryState,
       }}
     >
       {children}
