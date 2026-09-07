@@ -16,7 +16,7 @@ export const UpdatePasswordModal: React.FC<UpdatePasswordModalProps> = ({
   initialError,
   mode = 'recovery'
 }) => {
-  const { updatePassword } = useAuth()
+  const { user, updatePassword } = useAuth()
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -97,6 +97,13 @@ export const UpdatePasswordModal: React.FC<UpdatePasswordModalProps> = ({
                   ? 'Crea tu contraseña segura para activar tu cuenta de Punto Burger.'
                   : 'Ingresa una contraseña segura para tu cuenta de Punto Burger.'}
               </p>
+              {user?.email && (
+                <div className="pt-1">
+                  <span className="inline-block px-3 py-1 bg-zinc-100 border border-zinc-200 rounded-full text-[11px] font-mono text-zinc-600">
+                    Cuenta: {user.email}
+                  </span>
+                </div>
+              )}
             </div>
 
             {errorMsg && (

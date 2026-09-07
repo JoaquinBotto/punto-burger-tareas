@@ -30,15 +30,41 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
+const getInitialAuthFlow = (): { isRecovery: boolean; mode: AuthRecoveryMode; error: string | null } => {
+  if (typeof window === 'undefined') {
+    return { isRecovery: false, mode: null, error: null }
+  }
+  const pathname = window.location.pathname || ''
+  const hash = window.location.hash || ''
+  const search = window.location.search || ''
+
+  const isInvite = pathname === '/accept-invite' || hash.includes('type=invite') || search.includes('type=invite')
+  const isRecovery = pathname === '/update-password' || hash.includes('type=recovery') || search.includes('code=')
+
+  let error: string | null = null
+  if (hash.includes('error=') || search.includes('error=')) {
+    if (hash.includes('otp_expired') || hash.includes('expired') || search.includes('otp_expired')) {
+      error = 'El enlace venció o ya fue utilizado. Solicitá uno nuevo.'
+    } else {
+      error = 'El enlace no es válido o está incompleto. Solicitá uno nuevo.'
+    }
+  }
+
+  if (isInvite) return { isRecovery: true, mode: 'invite', error }
+  if (isRecovery) return { isRecovery: true, mode: 'recovery', error }
+  return { isRecovery: false, mode: null, error: null }
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const initialFlow = getInitialAuthFlow()
   const [session, setSession] = useState<Session | null>(null)
   const [user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
-  const [isPasswordRecovery, setIsPasswordRecovery] = useState<boolean>(false)
-  const [authRecoveryMode, setAuthRecoveryMode] = useState<AuthRecoveryMode>(null)
-  const [recoveryError, setRecoveryError] = useState<string | null>(null)
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState<boolean>(initialFlow.isRecovery)
+  const [authRecoveryMode, setAuthRecoveryMode] = useState<AuthRecoveryMode>(initialFlow.mode)
+  const [recoveryError, setRecoveryError] = useState<string | null>(initialFlow.error)
 
   const clearError = () => setError(null)
   
@@ -93,33 +119,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return
     }
 
-    // Inspect URL for recovery parameters or errors at boot
-    if (typeof window !== 'undefined') {
-      const hash = window.location.hash || ''
-      const search = window.location.search || ''
-      const pathname = window.location.pathname || ''
-
-      const isInviteTarget = pathname === '/accept-invite' || hash.includes('type=invite') || search.includes('type=invite')
-      const isRecoveryTarget = pathname === '/update-password' || hash.includes('type=recovery') || search.includes('code=')
-
-      if (isInviteTarget) {
-        setIsPasswordRecovery(true)
-        setAuthRecoveryMode('invite')
-      } else if (isRecoveryTarget) {
-        setIsPasswordRecovery(true)
-        setAuthRecoveryMode('recovery')
-      }
-
-      if (hash.includes('error=') || search.includes('error=')) {
-        if (hash.includes('otp_expired') || hash.includes('expired') || search.includes('otp_expired')) {
-          setRecoveryError('El enlace venció o ya fue utilizado. Solicitá uno nuevo.')
-        } else {
-          setRecoveryError('El enlace no es válido o está incompleto. Solicitá uno nuevo.')
-        }
-        setIsPasswordRecovery(true)
-      }
-    }
-
     // 1. Initial Session Check
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
@@ -141,6 +140,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setIsPasswordRecovery(true)
           setAuthRecoveryMode('recovery')
           setRecoveryError(null)
+        }
+
+        // Keep invite or recovery mode active if URL or session indicates it
+        if (typeof window !== 'undefined') {
+          const pathname = window.location.pathname || ''
+          const hash = window.location.hash || ''
+          if (pathname === '/accept-invite' || hash.includes('type=invite')) {
+            setIsPasswordRecovery(true)
+            setAuthRecoveryMode('invite')
+          }
         }
 
         if (event === 'SIGNED_OUT') {
